@@ -6,6 +6,13 @@
 
   <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <style>
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 6px; }
+    button { cursor: pointer; }
+    #log { white-space: pre-wrap; background: #f7f7f7; padding: 8px; }
+  </style>
 </head>
 <body>
   <h1>Staff Portal (Test)</h1>
@@ -17,57 +24,186 @@
   </div>
   <div class="g_id_signin"></div>
 
+  <h2>Log</h2>
   <pre id="log"></pre>
 
+  <h2>Visits</h2>
+  <div id="visits"></div>
+
   <script>
+    // ===== 設定 =====
+    const GAS_EXEC_URL = "https://script.google.com/macros/s/AKfycbzOikwjZQuTyWa_LDHGH_jVGugkMfWqFEiGmKySUea4MP-Hlh20RXRK2H9Ihrr5nYvdYA/exec";
+
+    // とりあえず固定（あとでUIにします）
+    const DEFAULT_DATE_FROM = "2025-12-01T00:00:00+09:00";
+    const DEFAULT_DATE_TO   = "2025-12-31T23:59:59+09:00";
+
+    // ===== 状態 =====
+    let ID_TOKEN = "";
+    let DATE_FROM = DEFAULT_DATE_FROM;
+    let DATE_TO   = DEFAULT_DATE_TO;
+
+    // listVisitsの結果を保持（完了トグル等で参照）
+    let lastVisits = [];
+
+    // ===== ログ =====
     function log(msg) {
-      document.getElementById('log').textContent += msg + "\n";
+      const el = document.getElementById('log');
+      el.textContent += msg + "\n";
     }
 
-    // Googleログイン後に呼ばれる
-    function onGoogleLogin(response) {
-      log("id_token received");
-      log(response.credential);
+    // ===== GAS呼び出し（form-urlencoded: payload=JSON）=====
+    async function callGas(action, idToken, extra = {}) {
+      const payloadObj = Object.assign({ action, id_token: idToken }, extra);
+      const body = new URLSearchParams({ payload: JSON.stringify(payloadObj) });
 
-      // ここではまだ GAS には送らない
-      // 次ステップで listVisits を叩く
+      const res = await fetch(GAS_EXEC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body
+      });
+
+      // GASは text で受ける（CORS/実装差異でjsonが読めないケース回避）
+      return await res.text();
+    }
+
+    // ===== Googleログイン後に呼ばれる（GIS callback）=====
+    async function onGoogleLogin(response) {
+      try {
+        ID_TOKEN = response.credential || "";
+        log("id_token received");
+        log(ID_TOKEN);
+
+        // まず予約一覧
+        await refreshVisits();
+      } catch (e) {
+        log("onGoogleLogin error: " + String(e && e.message || e));
+      }
+    }
+
+    // ===== 予約一覧 再取得 =====
+    async function refreshVisits() {
+      if (!ID_TOKEN) {
+        log("No id_token. Please login.");
+        return;
+      }
+
+      const text = await callGas("listVisits", ID_TOKEN, {
+        date_from: DATE_FROM,
+        date_to: DATE_TO
+      });
+
+      log("listVisits resp (raw): " + text);
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        renderError("listVisits JSON parse failed: " + text);
+        return;
+      }
+
+      renderVisits(data);
+    }
+
+    // ===== 描画 =====
+    function renderError(msg) {
+      const el = document.getElementById('visits');
+      el.textContent = msg;
+    }
+
+    function renderVisits(list) {
+      const el = document.getElementById('visits');
+
+      if (!Array.isArray(list)) {
+        el.textContent = 'Unexpected response: ' + JSON.stringify(list);
+        return;
+      }
+
+      lastVisits = list;
+
+      const safe = (s) => String(s ?? "");
+      const rows = list.map(v => `
+        <tr>
+          <td>${safe(v.start_time)}</td>
+          <td>${safe(v.customer_name || v.customer_id)}</td>
+          <td>${safe(v.title)}</td>
+          <td>${safe(v.is_done ?? "")}</td>
+          <td><button data-visit-id="${safe(v.visit_id)}" class="btnDone">完了切替</button></td>
+          <td><button data-customer-id="${safe(v.customer_id)}" class="btnCust">顧客詳細</button></td>
+        </tr>
+      `).join("");
+
+      el.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>開始</th>
+              <th>顧客</th>
+              <th>タイトル</th>
+              <th>完了</th>
+              <th></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+
+      // ボタンイベント
+      el.querySelectorAll('.btnDone').forEach(btn => {
+        btn.addEventListener('click', () => onToggleDone(btn.dataset.visitId));
+      });
+      el.querySelectorAll('.btnCust').forEach(btn => {
+        btn.addEventListener('click', () => onOpenCustomer(btn.dataset.customerId));
+      });
+    }
+
+    function findVisit(visitId) {
+      return lastVisits.find(v => String(v.visit_id) === String(visitId));
+    }
+
+    // ===== 完了切替（updateVisit）=====
+    async function onToggleDone(visitId) {
+      try {
+        if (!ID_TOKEN) return;
+
+        const v = findVisit(visitId);
+        // is_done が listVisits に含まれない場合、常に false になります（その場合は「true固定」になる）
+        const current = v ? !!v.is_done : false;
+        const next = !current;
+
+        const text = await callGas("updateVisit", ID_TOKEN, {
+          visit_id: visitId,
+          fields: { is_done: next },
+          sync_calendar: true
+        });
+
+        log("updateVisit resp (raw): " + text);
+
+        // 成功/失敗はGASの返却仕様に依存するため、まずは再読込して反映
+        await refreshVisits();
+      } catch (e) {
+        log("onToggleDone error: " + String(e && e.message || e));
+      }
+    }
+
+    // ===== 顧客詳細（getCustomerDetail）=====
+    async function onOpenCustomer(customerId) {
+      try {
+        if (!ID_TOKEN) return;
+
+        const text = await callGas("getCustomerDetail", ID_TOKEN, {
+          customer_id: customerId
+        });
+
+        log("getCustomerDetail resp (raw): " + text);
+
+        // ひとまずログに出すだけ。次ステップでタブUIに整形します。
+      } catch (e) {
+        log("onOpenCustomer error: " + String(e && e.message || e));
+      }
     }
   </script>
 </body>
 </html>
-
-<script>
-  const GAS_EXEC_URL = "https://script.google.com/macros/s/AKfycbzOikwjZQuTyWa_LDHGH_jVGugkMfWqFEiGmKySUea4MP-Hlh20RXRK2H9Ihrr5nYvdYA/exec";
-
-  function log(msg) {
-    document.getElementById('log').textContent += msg + "\n";
-  }
-
-  async function callGas(action, idToken, extra = {}) {
-    const payloadObj = Object.assign({ action, id_token: idToken }, extra);
-    const body = new URLSearchParams({ payload: JSON.stringify(payloadObj) });
-
-    // CORS/プリフライトを避ける：余計なヘッダを付けない
-    const res = await fetch(GAS_EXEC_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-      body
-    });
-
-    // ここで CORS が厳しい環境だと res.json() が読めない場合があります
-    const text = await res.text();
-    return text;
-  }
-
-  function onGoogleLogin(response) {
-    const idToken = response.credential;
-    log("id_token received");
-    log(idToken);
-
-    // まずは listVisits を叩く（期間は仮でOK）
-    callGas("listVisits", idToken, {
-      date_from: "2025-12-01T00:00:00+09:00",
-      date_to: "2025-12-31T23:59:59+09:00"
-    })
-  }
-</script>
