@@ -123,16 +123,19 @@
       lastVisits = list;
 
       const safe = (s) => String(s ?? "");
-      const rows = list.map(v => `
-        <tr>
+      const rows = list.map(v => {
+        const done = !!v.is_done;
+        const trStyle = done ? ' style="background:#e8f5e9;"' : '';
+        return `
+        <tr${trStyle}>
           <td>${safe(v.start_time)}</td>
           <td>${safe(v.customer_name || v.customer_id)}</td>
           <td>${safe(v.title)}</td>
           <td>${safe(v.is_done ?? "")}</td>
           <td><button data-visit-id="${safe(v.visit_id)}" class="btnDone">完了切替</button></td>
           <td><button data-customer-id="${safe(v.customer_id)}" class="btnCust">顧客詳細</button></td>
-        </tr>
-      `).join("");
+        </tr>`;
+      }).join("");
 
       el.innerHTML = `
         <table>
