@@ -54,9 +54,17 @@
 
     // ===== GAS呼び出し（form-urlencoded: payload=JSON）=====
     async function callGas(action, idToken, extra = {}) {
-      const payloadObj = Object.assign({ action, id_token: idToken }, extra);
+      // 更新系は必ずユニーク request_id を付与（Idempotent replay 回避）
+      // 取得系も付けてOK（ログ追跡が楽になる）
+      const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + "_" + Math.random();
+
+      const payloadObj = Object.assign(
+        { action, id_token: idToken, request_id: requestId, source: "staff_web" },
+        extra
+      );
+
       const body = new URLSearchParams({ payload: JSON.stringify(payloadObj) });
-  
+
       const t0 = performance.now();
       const res = await fetch(GAS_EXEC_URL, {
         method: "POST",
@@ -64,11 +72,11 @@
         body
       });
       const t1 = performance.now();
-  
+
       const text = await res.text();
       const t2 = performance.now();
-  
-      log(`[timing] action=${action} fetch=${(t1-t0).toFixed(0)}ms read=${(t2-t1).toFixed(0)}ms total=${(t2-t0).toFixed(0)}ms status=${res.status}`);
+
+      log(`[timing] action=${action} fetch=${(t1-t0).toFixed(0)}ms read=${(t2-t1).toFixed(0)}ms total=${(t2-t0).toFixed(0)}ms status=${res.status} request_id=${requestId}`);
       return text;
     }
 
@@ -175,36 +183,42 @@
     async function onToggleDone(visitId) {
       try {
         if (!ID_TOKEN) return;
-    
+
         const v = findVisit(visitId);
         const current = v ? !!v.is_done : false;
         const next = !current;
-    
-        // 先にUIだけ即時反映（体感改善）
+
+        // まずUIを即時反映（体感高速化）
         if (v) v.is_done = next;
         renderVisits(lastVisits);
-    
+
         const text = await callGas("updateVisit", ID_TOKEN, {
           visit_id: visitId,
           fields: { is_done: next },
           sync_calendar: false,
-          // 書き込み系は冪等のため content_hash が作られる（GAS側対応済）
         });
-    
+
         log("updateVisit resp (raw): " + text);
-    
+
         let resp;
-        try { resp = JSON.parse(text); } catch (_) {}
-    
-        // 失敗なら元に戻す
+        try { resp = JSON.parse(text); } catch (_) { resp = null; }
+
         if (!resp || resp.success !== true) {
+          // 失敗時は戻す
           if (v) v.is_done = current;
           renderVisits(lastVisits);
-          log("updateVisit failed; reverted UI.");
           return;
         }
-    
-        // 成功ならそのまま（ここで listVisits を叩かない）
+
+        // サーバー確定値で整合（DB確定値を優先）
+        if (resp.updated && typeof resp.updated.is_done !== "undefined") {
+          if (v) v.is_done = !!resp.updated.is_done;
+          renderVisits(lastVisits);
+        }
+
+        // 必要なときだけ再取得（例：他フィールドも変わる更新をした場合）
+        // await refreshVisits();
+
       } catch (e) {
         log("onToggleDone error: " + String(e && e.message || e));
       }
