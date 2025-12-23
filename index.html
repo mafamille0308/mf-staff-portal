@@ -56,15 +56,20 @@
     async function callGas(action, idToken, extra = {}) {
       const payloadObj = Object.assign({ action, id_token: idToken }, extra);
       const body = new URLSearchParams({ payload: JSON.stringify(payloadObj) });
-
+  
+      const t0 = performance.now();
       const res = await fetch(GAS_EXEC_URL, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body
       });
-
-      // GASは text で受ける（CORS/実装差異でjsonが読めないケース回避）
-      return await res.text();
+      const t1 = performance.now();
+  
+      const text = await res.text();
+      const t2 = performance.now();
+  
+      log(`[timing] action=${action} fetch=${(t1-t0).toFixed(0)}ms read=${(t2-t1).toFixed(0)}ms total=${(t2-t0).toFixed(0)}ms status=${res.status}`);
+      return text;
     }
 
     // ===== Googleログイン後に呼ばれる（GIS callback）=====
