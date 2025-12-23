@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>ma famille staff portal</title>
+
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <h1>Staff Portal (Test)</h1>
+
+  <!-- ログインボタン -->
+  <div id="g_id_onload"
+       data-client_id="ここは後で入れる"
+       data-callback="onGoogleLogin">
+  </div>
+  <div class="g_id_signin"></div>
+
+  <pre id="log"></pre>
+
+  <script>
+    function log(msg) {
+      document.getElementById('log').textContent += msg + "\n";
+    }
+
+    // Googleログイン後に呼ばれる
+    function onGoogleLogin(response) {
+      log("id_token received");
+      log(response.credential);
+
+      // ここではまだ GAS には送らない
+      // 次ステップで listVisits を叩く
+    }
+  </script>
+</body>
+</html>
