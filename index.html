@@ -195,7 +195,6 @@
         const text = await callGas("updateVisit", ID_TOKEN, {
           visit_id: visitId,
           fields: { is_done: next },
-          sync_calendar: false,
         });
 
         log("updateVisit resp (raw): " + text);
