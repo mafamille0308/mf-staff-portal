@@ -12,7 +12,7 @@
 
   <!-- ログインボタン -->
   <div id="g_id_onload"
-       data-client_id="ここは後で入れる"
+       data-client_id="721404541012-sdsefklaglk2801a7qai38ooslon2gj3.apps.googleusercontent.com"
        data-callback="onGoogleLogin">
   </div>
   <div class="g_id_signin"></div>
@@ -35,3 +35,45 @@
   </script>
 </body>
 </html>
+
+<script>
+  const GAS_EXEC_URL = "https://script.google.com/macros/s/AKfycbzOikwjZQuTyWa_LDHGH_jVGugkMfWqFEiGmKySUea4MP-Hlh20RXRK2H9Ihrr5nYvdYA/exec";
+
+  function log(msg) {
+    document.getElementById('log').textContent += msg + "\n";
+  }
+
+  async function callGas(action, idToken, extra = {}) {
+    const payloadObj = Object.assign({ action, id_token: idToken }, extra);
+    const body = new URLSearchParams({ payload: JSON.stringify(payloadObj) });
+
+    // CORS/プリフライトを避ける：余計なヘッダを付けない
+    const res = await fetch(GAS_EXEC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+      body
+    });
+
+    // ここで CORS が厳しい環境だと res.json() が読めない場合があります
+    const text = await res.text();
+    return text;
+  }
+
+  function onGoogleLogin(response) {
+    const idToken = response.credential;
+    log("id_token received");
+    log(idToken);
+
+    // まずは listVisits を叩く（期間は仮でOK）
+    callGas("listVisits", idToken, {
+      date_from: "2025-12-01T00:00:00+09:00",
+      date_to: "2025-12-31T23:59:59+09:00"
+    }).then((text) => {
+      log("GAS response (raw):");
+      log(text);
+    }).catch((err) => {
+      log("GAS call error:");
+      log(String(err && err.message || err));
+    });
+  }
+</script>
