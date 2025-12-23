@@ -65,9 +65,15 @@
     log(idToken);
 
     // まずは listVisits を叩く（期間は仮でOK）
-    callGas("debugTokeninfo", idToken, {}).then((text) => {
+    callGas("listVisits", idToken, {
+      date_from: "2025-12-01T00:00:00+09:00",
+      date_to: "2025-12-31T23:59:59+09:00"
+    }).then((text) => {
       log("GAS response (raw):");
       log(text);
+    }).catch((err) => {
+      log("GAS call error:");
+      log(String(err && err.message || err));
     });
   }
 </script>
