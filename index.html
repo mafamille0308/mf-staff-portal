@@ -175,22 +175,36 @@
     async function onToggleDone(visitId) {
       try {
         if (!ID_TOKEN) return;
-
+    
         const v = findVisit(visitId);
-        // is_done が listVisits に含まれない場合、常に false になります（その場合は「true固定」になる）
         const current = v ? !!v.is_done : false;
         const next = !current;
-
+    
+        // 先にUIだけ即時反映（体感改善）
+        if (v) v.is_done = next;
+        renderVisits(lastVisits);
+    
         const text = await callGas("updateVisit", ID_TOKEN, {
           visit_id: visitId,
           fields: { is_done: next },
           sync_calendar: false,
+          // 書き込み系は冪等のため content_hash が作られる（GAS側対応済）
         });
-
+    
         log("updateVisit resp (raw): " + text);
-
-        // 成功/失敗はGASの返却仕様に依存するため、まずは再読込して反映
-        await refreshVisits();
+    
+        let resp;
+        try { resp = JSON.parse(text); } catch (_) {}
+    
+        // 失敗なら元に戻す
+        if (!resp || resp.success !== true) {
+          if (v) v.is_done = current;
+          renderVisits(lastVisits);
+          log("updateVisit failed; reverted UI.");
+          return;
+        }
+    
+        // 成功ならそのまま（ここで listVisits を叩かない）
       } catch (e) {
         log("onToggleDone error: " + String(e && e.message || e));
       }
