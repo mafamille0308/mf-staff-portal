@@ -16,7 +16,7 @@ function defaultRange() {
   from.setDate(from.getDate()); // today
   const to = new Date(now);
   to.setDate(to.getDate() + 14); // +14 days
-  return { date_from: toYmd(from), date_to: toYmd(to) };
+  return { date_from: toYmd(from), date_to: toYmd(to) + " 23:59:59" };
 }
 
 function badgeHtml(text) {
@@ -61,6 +61,7 @@ function cardHtml(v) {
 
 export async function renderVisitsList(appEl, query) {
   const { date_from, date_to } = defaultRange();
+  const date_to_label = date_to.slice(0, 10);
 
   render(appEl, `
     <section class="section">
@@ -69,7 +70,7 @@ export async function renderVisitsList(appEl, query) {
       <div class="hr"></div>
       <div class="row">
         <div class="badge">from: ${escapeHtml(date_from)}</div>
-        <div class="badge">to: ${escapeHtml(date_to)}</div>
+        <div class="badge">to: ${escapeHtml(date_to_label)}</div>
       </div>
       <div class="hr"></div>
       <div id="visitsList"></div>
@@ -88,7 +89,7 @@ export async function renderVisitsList(appEl, query) {
     action: "listVisits",
     date_from,
     date_to,
-    include_inactive: false,
+    only_active: true,
   }, idToken);
 
   // GAS側の返却形（例：{ ok:true, ctx:{...}, results:[...] } を想定）
