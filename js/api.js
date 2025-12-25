@@ -56,3 +56,11 @@ export async function callGas(payload, idToken) {
 
   return json;
 }
+
+// callGas の返却が「配列 or オブジェクト」どちらでも動かす
+export function unwrapResults(res) {
+  if (Array.isArray(res)) return { results: res, ctx: null, raw: res };
+  const results = (res && (res.results || res.visits || res.data)) || [];
+  const ctx = (res && res.ctx) || null;
+  return { results, ctx, raw: res };
+}

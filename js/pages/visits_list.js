@@ -72,9 +72,6 @@ export async function renderVisitsList(appEl, query) {
         <div class="badge">from: ${escapeHtml(date_from)}</div>
         <div class="badge">to: ${escapeHtml(date_to_label)}</div>
       </div>
-     <div class="row" style="justify-content:flex-end;">
-       <button class="btn btn-ghost" id="btnDebugSample" type="button">デバッグ: サンプル取得</button>
-     </div>
       <div class="hr"></div>
       <div id="visitsList"></div>
     </section>
@@ -87,37 +84,22 @@ export async function renderVisitsList(appEl, query) {
 
   const idToken = getIdToken();
 
-  const btnDebug = appEl.querySelector("#btnDebugSample");
-  btnDebug?.addEventListener("click", async () => {
-    try {
-      const dbg = await callGas({ action: "debugVisitsSample" }, idToken);
-      console.log("debugVisitsSample:", dbg);
-      // 見やすく表で確認
-      if (dbg && dbg.sample) console.table(dbg.sample);
-      toast({ title: "デバッグ取得", message: "consoleに sample を出力しました" });
-    } catch (e) {
-      console.error("debugVisitsSample error:", e);
-      toast({ title: "デバッグ失敗", message: e?.message || String(e) });
-    }
-  });
-
-  // listVisits 呼び出し
+  // listVisits 呼び出し（直近2週間）
   const res = await callGas({
     action: "listVisits",
-    date_from: "",
-    date_to: "",
+    date_from,
+    date_to,
   }, idToken);
 
   console.log("listVisits raw resp:", res);
 
-  // ctx が返る場合のみ反映（将来互換）
-  if (res && res.ctx) setUser(res.ctx);
+  // 配列/オブジェクト両対応で results と ctx を取り出す
+  const { results: visits, ctx } = unwrapResults(res);
+
+  // ctx があればログインユーザー情報を更新
+  if (ctx) setUser(ctx);
 
   // 返却が配列パターン / オブジェクトパターン両対応
-  const visits =
-    Array.isArray(res) ? res :
-    (res && (res.results || res.visits || res.data)) || [];
-
   if (!Array.isArray(visits) || visits.length === 0) {
     listEl.innerHTML = `<p class="p">対象期間の予約がありません。</p>`;
     return;
