@@ -1,6 +1,6 @@
 // js/pages/visits_list.js
 import { render, toast, escapeHtml } from "../ui.js";
-import { callGas } from "../api.js";
+import { callGas, unwrapResults } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 
 function toYmd(d) {
