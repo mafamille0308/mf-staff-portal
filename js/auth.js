@@ -11,20 +11,28 @@ let _user = null; // { email, role, staff_id, name? } をGASから返す想定�
 const KEY_ID_TOKEN = "mf_id_token";
 
 export function setIdToken(idToken) {
-  if (!idToken) return;
-  sessionStorage.setItem(KEY_ID_TOKEN, String(idToken));
+  const t = String(idToken || "").trim();
+  if (!t) return;
+  _idToken = t;
+  sessionStorage.setItem(KEY_ID_TOKEN, t);
 }
 
 export function getIdToken() {
-  return String(sessionStorage.getItem(KEY_ID_TOKEN) || "").trim();
+  const t = String(sessionStorage.getItem(KEY_ID_TOKEN) || "").trim();
+  if (t && !_idToken) _idToken = t; // 復元時にメモリも同期
+  return t;
 }
 
 export function clearIdToken() {
+  _idToken = "";
   sessionStorage.removeItem(KEY_ID_TOKEN);
 }
 
 export function getUser() { return _user; }
-export function isAuthed() { return !!_idToken; }
+
+export function isAuthed() {
+  return !!getIdToken();
+}
 
 /**
  * GIS 初期化：ログインボタンを描画し、id_token を取得
@@ -49,6 +57,8 @@ export function initGoogleLogin({ containerId = "app", onLogin } = {}) {
         return;
       }
       _idToken = token;
+      setIdToken(token); // 永続化
+
       toast({ title: "ログイン完了", message: "認証トークンを取得しました。" });
       if (typeof onLogin === "function") onLogin(token);
     },
