@@ -85,6 +85,8 @@ export async function renderVisitsList(appEl, query) {
 
   listEl.innerHTML = `<p class="p">読み込み中...</p>`;
 
+  const idToken = getIdToken();
+
   const btnDebug = appEl.querySelector("#btnDebugSample");
   btnDebug?.addEventListener("click", async () => {
     try {
@@ -99,8 +101,6 @@ export async function renderVisitsList(appEl, query) {
     }
   });
 
-  const idToken = getIdToken();
-
   // listVisits 呼び出し
   const res = await callGas({
     action: "listVisits",
@@ -110,10 +110,14 @@ export async function renderVisitsList(appEl, query) {
 
   console.log("listVisits raw resp:", res);
 
-  // GAS側の返却形（例：{ ok:true, ctx:{...}, results:[...] } を想定）
+  // ctx が返る場合のみ反映（将来互換）
   if (res && res.ctx) setUser(res.ctx);
 
-  const visits = (res && (res.results || res.visits || res.data)) || [];
+  // 返却が配列パターン / オブジェクトパターン両対応
+  const visits =
+    Array.isArray(res) ? res :
+    (res && (res.results || res.visits || res.data)) || [];
+
   if (!Array.isArray(visits) || visits.length === 0) {
     listEl.innerHTML = `<p class="p">対象期間の予約がありません。</p>`;
     return;
