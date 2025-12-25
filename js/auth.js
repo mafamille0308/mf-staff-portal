@@ -5,7 +5,24 @@ import { toast } from "./ui.js";
 let _idToken = "";
 let _user = null; // { email, role, staff_id, name? } をGASから返す想定に対応
 
-export function getIdToken() { return _idToken; }
+/**
+ * id_token を sessionStorage に保存・復元
+ */
+const KEY_ID_TOKEN = "mf_id_token";
+
+export function setIdToken(idToken) {
+  if (!idToken) return;
+  sessionStorage.setItem(KEY_ID_TOKEN, String(idToken));
+}
+
+export function getIdToken() {
+  return String(sessionStorage.getItem(KEY_ID_TOKEN) || "").trim();
+}
+
+export function clearIdToken() {
+  sessionStorage.removeItem(KEY_ID_TOKEN);
+}
+
 export function getUser() { return _user; }
 export function isAuthed() { return !!_idToken; }
 

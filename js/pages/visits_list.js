@@ -83,6 +83,13 @@ export async function renderVisitsList(appEl, query) {
   listEl.innerHTML = `<p class="p">読み込み中...</p>`;
 
   const idToken = getIdToken();
+  if (!idToken) {
+    listEl.innerHTML = `<p class="p">ログイン情報が見つかりません。再ログインしてください。</p>`;
+    toast({ title: "再ログインが必要です", message: "F5/再起動後はログインし直してください（現状仕様）" });
+    // 可能なら router で /login へ遷移
+    // location.hash = "#/login";
+    return;
+  }
 
   // listVisits 呼び出し（直近2週間）
   const res = await callGas({
@@ -92,6 +99,14 @@ export async function renderVisitsList(appEl, query) {
   }, idToken);
 
   console.log("listVisits raw resp:", res);
+
+  // 失敗時は 0件表示にせず、明確にエラー表示
+  if (!res || res.success === false) {
+    const msg = (res && (res.error || res.message)) || "listVisits failed";
+    listEl.innerHTML = `<p class="p">取得に失敗しました：${escapeHtml(msg)}</p>`;
+    toast({ title: "取得失敗", message: msg });
+    return;
+  }
 
   // 配列/オブジェクト両対応で results と ctx を取り出す
   const { results: visits, ctx } = unwrapResults(res);
