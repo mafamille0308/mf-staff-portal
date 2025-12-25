@@ -108,6 +108,8 @@ export async function renderVisitsList(appEl, query) {
     date_to: "",
   }, idToken);
 
+  console.log("listVisits raw resp:", res);
+
   // GAS側の返却形（例：{ ok:true, ctx:{...}, results:[...] } を想定）
   if (res && res.ctx) setUser(res.ctx);
 
