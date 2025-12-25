@@ -87,9 +87,8 @@ export async function renderVisitsList(appEl, query) {
   // listVisits 呼び出し
   const res = await callGas({
     action: "listVisits",
-    date_from,
-    date_to,
-    only_active: true,
+    date_from: "",
+    date_to: "",
   }, idToken);
 
   // GAS側の返却形（例：{ ok:true, ctx:{...}, results:[...] } を想定）
