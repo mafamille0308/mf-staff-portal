@@ -56,7 +56,7 @@ export function initGoogleLogin({ containerId = "app", onLogin } = {}) {
         toast({ title: "ログイン失敗", message: "credential が取得できませんでした。" });
         return;
       }
-      _idToken = token;
+
       setIdToken(token); // 永続化
 
       toast({ title: "ログイン完了", message: "認証トークンを取得しました。" });

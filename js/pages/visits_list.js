@@ -84,10 +84,7 @@ export async function renderVisitsList(appEl, query) {
 
   const idToken = getIdToken();
   if (!idToken) {
-    listEl.innerHTML = `<p class="p">ログイン情報が見つかりません。再ログインしてください。</p>`;
-    toast({ title: "再ログインが必要です", message: "F5/再起動後はログインし直してください（現状仕様）" });
-    // 可能なら router で /login へ遷移
-    // location.hash = "#/login";
+    listEl.innerHTML = `<p class="p">ログインしてください。</p>`;
     return;
   }
 

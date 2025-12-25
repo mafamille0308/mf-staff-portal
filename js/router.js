@@ -51,7 +51,8 @@ async function route() {
       containerId: "app",
       onLogin: () => {
         // ログイン後は予約一覧へ
-        location.hash = "#/visits";
+        if (location.hash !== "#/visits") location.hash = "#/visits";
+        route(); // hashchangeが発火しないケースでも再描画する
       },
     });
     updateHeaderUserBadge();
@@ -91,5 +92,6 @@ export function initApp() {
   });
 
   window.addEventListener("hashchange", route);
+  window.addEventListener("mf:auth:changed", route);
   route();
 }
