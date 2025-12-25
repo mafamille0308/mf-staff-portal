@@ -72,6 +72,9 @@ export async function renderVisitsList(appEl, query) {
         <div class="badge">from: ${escapeHtml(date_from)}</div>
         <div class="badge">to: ${escapeHtml(date_to_label)}</div>
       </div>
+     <div class="row" style="justify-content:flex-end;">
+       <button class="btn btn-ghost" id="btnDebugSample" type="button">デバッグ: サンプル取得</button>
+     </div>
       <div class="hr"></div>
       <div id="visitsList"></div>
     </section>
@@ -81,6 +84,20 @@ export async function renderVisitsList(appEl, query) {
   if (!listEl) return;
 
   listEl.innerHTML = `<p class="p">読み込み中...</p>`;
+
+  const btnDebug = appEl.querySelector("#btnDebugSample");
+  btnDebug?.addEventListener("click", async () => {
+    try {
+      const dbg = await callGas({ action: "debugVisitsSample" }, idToken);
+      console.log("debugVisitsSample:", dbg);
+      // 見やすく表で確認
+      if (dbg && dbg.sample) console.table(dbg.sample);
+      toast({ title: "デバッグ取得", message: "consoleに sample を出力しました" });
+    } catch (e) {
+      console.error("debugVisitsSample error:", e);
+      toast({ title: "デバッグ失敗", message: e?.message || String(e) });
+    }
+  });
 
   const idToken = getIdToken();
 
