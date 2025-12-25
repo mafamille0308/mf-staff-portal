@@ -26,7 +26,7 @@ function badgeHtml(text) {
 function statusBadge(status, done) {
   if (done === true) return `<span class="badge badge-ok">完了</span>`;
   if (status) return badgeHtml(status);
-  return `<span class="badge">-</span>`;
+  return `<span class="badge">未完了</span>`;
 }
 
 function cardHtml(v) {
@@ -50,7 +50,7 @@ function cardHtml(v) {
       </div>
       <div class="badges">
         ${statusBadge(status, done)}
-        ${v.is_active === false ? `<span class="badge badge-danger">削除</span>` : ``}
+        ${v.is_active === false ? `<span class="badge badge-danger">削除済</span>` : ``}
       </div>
       <div class="row" style="justify-content:flex-end; margin-top:10px;">
         <button class="btn btn-ghost" type="button" data-action="open">詳細（次）</button>
