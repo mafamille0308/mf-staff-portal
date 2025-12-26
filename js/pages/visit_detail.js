@@ -1,5 +1,5 @@
 // js/pages/visit_detail.js
-import { render, toast, escapeHtml } from "../ui.js";
+import { render, toast, escapeHtml, showModal } from "../ui.js";
 import { callGas } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 
@@ -130,7 +130,18 @@ export async function renderVisitDetail(appEl, query) {
         <div><strong>担当者</strong>：${escapeHtml(staffName || displayOrDash(visit.staff_id))}</div>
         <div><strong>顧客名</strong>：${escapeHtml(customerName || displayOrDash(visit.customer_id))}</div>
         <div><strong>請求ステータス</strong>：${escapeHtml(displayOrDash(visit.request_status))}</div>
-        <div><strong>メモ</strong>：${escapeHtml(displayOrDash(visit.memo))}</div>
+        <div><strong>メモ</strong>：<span id="memoText">${escapeHtml(displayOrDash(visit.memo))}</span></div>
+        <div class="row" style="gap:8px; margin-top:8px;">
+          <button class="btn btn-ghost" type="button" id="btnEditMemo">メモを編集</button>
+        </div>
+        <div id="memoEditBox" class="is-hidden" style="margin-top:10px;">
+          <textarea id="memoInput" rows="5" style="width:100%;"></textarea>
+          <div class="row" style="gap:8px; justify-content:flex-end; margin-top:8px;">
+            <button class="btn btn-ghost" type="button" id="btnCancelMemo">キャンセル</button>
+            <button class="btn" type="button" id="btnSaveMemo">保存</button>
+          </div>
+          <div class="p" style="margin-top:6px; opacity:0.75;">空欄で保存するとメモは空になります。</div>
+        </div>
       </div>
     </div>
   `;
@@ -182,4 +193,101 @@ export async function renderVisitDetail(appEl, query) {
     ${section("予約情報", visitHtml)}
     ${section("顧客・ペット・お世話情報", customerHtml)}
   `;
+
+  // ===== memo 編集 =====
+  const btnEdit = host.querySelector("#btnEditMemo");
+  const btnCancel = host.querySelector("#btnCancelMemo");
+  const btnSave = host.querySelector("#btnSaveMemo");
+  const editBox = host.querySelector("#memoEditBox");
+  const memoInput = host.querySelector("#memoInput");
+  const memoText = host.querySelector("#memoText");
+
+  const currentMemo = fmt(visit.memo || "");
+  if (memoInput) memoInput.value = currentMemo;
+
+  const setEditMode = (on) => {
+    if (!editBox) return;
+    editBox.classList.toggle("is-hidden", !on);
+    if (on && memoInput) memoInput.focus();
+  };
+
+  if (btnEdit) btnEdit.addEventListener("click", () => setEditMode(true));
+  if (btnCancel) btnCancel.addEventListener("click", () => {
+    if (memoInput) memoInput.value = currentMemo;
+    setEditMode(false);
+  });
+
+  if (btnSave) btnSave.addEventListener("click", async () => {
+    if (!memoInput) return;
+    if (btnSave.disabled || btnSave.dataset.busy === "1") return;
+
+    const nextMemo = String(memoInput.value || "");
+    // 任意：過剰入力ガード（上限は運用に合わせて調整）
+    if (nextMemo.length > 2000) {
+      toast({ title: "入力エラー", message: "メモが長すぎます（最大2000文字）。" });
+      return;
+    }
+
+    const ok = await showModal({
+      title: "確認",
+      bodyHtml: `<p class="p">メモを保存します。よろしいですか？</p>`,
+      okText: "保存",
+      cancelText: "キャンセル",
+    });
+    if (!ok) return;
+
+    btnSave.dataset.busy = "1";
+    btnSave.disabled = true;
+    const prevText = btnSave.textContent;
+    btnSave.textContent = "保存中...";
+
+    try {
+      const idToken2 = getIdToken();
+      if (!idToken2) {
+        toast({ title: "未ログイン", message: "再ログインしてください。" });
+        return;
+      }
+
+      const up = await callGas({
+        action: "updateVisit",
+        origin: "portal",
+        source: "portal",
+        visit_id: visitId,
+        fields: { memo: nextMemo },
+      }, idToken2);
+
+      if (!up || up.success === false) {
+        throw new Error((up && (up.error || up.message)) || "更新に失敗しました。");
+      }
+
+      // 取り違え防止：保存後に必ず最新を取り直す（visit の memo を更新）
+      const re = await callGas({
+        action: "getVisitDetail",
+        visit_id: visitId,
+        include_customer_detail: true,
+      }, idToken2);
+
+      if (!re || re.success === false) {
+        throw new Error((re && (re.error || re.message)) || "再取得に失敗しました。");
+      }
+      if (re.ctx) setUser(re.ctx);
+
+      const v2 = re.visit || re.result || null;
+      const freshMemo = fmt(v2 && v2.memo);
+
+      if (memoText) memoText.textContent = freshMemo.trim() ? freshMemo : "—";
+      // currentMemo の更新（キャンセル時の復元用）
+      // ※ const を変えないため、入力欄も更新して edit を閉じる
+      if (memoInput) memoInput.value = freshMemo;
+      setEditMode(false);
+
+      toast({ title: "保存完了", message: "メモを更新しました。" });
+    } catch (err) {
+      toast({ title: "保存失敗", message: (err && err.message) ? err.message : String(err || "") });
+    } finally {
+      btnSave.dataset.busy = "0";
+      btnSave.disabled = false;
+      btnSave.textContent = prevText;
+    }
+  });
 }
