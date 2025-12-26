@@ -3,6 +3,7 @@ import { qs, render, setActiveNav, toast } from "./ui.js";
 import { initGoogleLogin, isAuthed, getUser } from "./auth.js";
 
 import { renderVisitsList } from "./pages/visits_list.js";
+import { renderVisitDetail } from "./pages/visit_detail.js";
 import { renderCustomersPlaceholder } from "./pages/customers_list.js";
 import { renderSummaryPlaceholder } from "./pages/summary.js";
 import { renderMailIntakePlaceholder } from "./pages/mail_intake.js";
@@ -62,7 +63,12 @@ async function route() {
   // ルート分岐（まずは visits のみ実装）
   try {
     if (path === "/visits") {
-      await renderVisitsList(app, query);
+      const vid = query.get("id");
+      if (vid) {
+        await renderVisitDetail(app, query);
+      } else {
+        await renderVisitsList(app, query);
+      }
     } else if (path === "/customers") {
       renderCustomersPlaceholder(app);
     } else if (path === "/summary") {
