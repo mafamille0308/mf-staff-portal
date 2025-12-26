@@ -47,10 +47,9 @@ export async function renderVisitDetail(appEl, query) {
   try {
     res = await callGas({
       action: "getVisitDetail",
-      id_token: idToken,
       visit_id: visitId,
       include_customer_detail: true,
-    });
+    }, idToken);
   } catch (err) {
     const msg = err?.message || String(err || "");
     toast({ title: "取得失敗", message: msg });

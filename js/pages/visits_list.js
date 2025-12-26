@@ -94,10 +94,9 @@ export async function renderVisitsList(appEl, query) {
     try {
       res = await callGas({
         action: "listVisits",
-        id_token: idToken,
         date_from,
         date_to,
-      });
+      }, idToken);
     } catch (err) {
       const msg = err?.message || String(err || "");
       toast({ title: "取得失敗", message: msg });
@@ -168,13 +167,12 @@ export async function renderVisitsList(appEl, query) {
 
         const res = await callGas({
           action: "updateVisit",
-          id_token: idToken,
           source: "portal",
           origin: "portal",
           visit_id: vid,
           fields: { is_done: nextDone },
           // 既定どおり sync_calendar=true（doneはカレンダー側の表示にも反映したい）
-        });
+        }, idToken);
 
         if (!res || res.success === false) {
           throw new Error((res && res.error) || "更新に失敗しました。");
