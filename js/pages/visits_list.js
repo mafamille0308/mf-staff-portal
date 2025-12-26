@@ -48,7 +48,7 @@ function cardHtml(v) {
         <div><strong>${escapeHtml(customer || "(顧客未設定)")}</strong></div>
         <div>${escapeHtml(title)}</div>
       </div>
-      <div class="badges">
+      <div class="badges" data-role="badges">
         ${statusBadge(status, done)}
         ${v.is_active === false ? `<span class="badge badge-danger">削除済</span>` : ``}
       </div>
@@ -180,10 +180,28 @@ export async function renderVisitsList(appEl, query) {
 
         toast({ title: "更新完了", message: `「${nextDone ? "完了" : "未完了"}」に更新しました。` });
 
-        // 取り違え防止のため、必ず最新状態を再取得して再描画
-        await fetchAndRender_();
+        // 対象カードだけ更新
+        card.dataset.done = nextDone ? "1" : "0";
+        // 成功時の文言を最終確定値にする（finallyで戻さない）
+        btn.textContent = nextDone ? "未完了に戻す" : "完了にする";
+
+        // badgesを差し替え（statusはカードDOMからは取れないので、既存表示を温存しつつ完了バッジだけ反映）
+        // シンプルに badges 全体を statusBadge + (削除済は残す) で再構築する
+        const badgesEl = card.querySelector('[data-role="badges"]');
+        if (badgesEl) {
+          const isDeleted = badgesEl.querySelector(".badge-danger") ? true : false;
+          // いま表示中の status テキストを拾う（完了バッジ以外の先頭badgeをstatus扱い）
+          const firstBadgeText = badgesEl.querySelector(".badge")?.textContent || "";
+          // 完了なら status より完了を優先する既存ロジックに合わせ、status文字列は firstBadgeText を使う
+          badgesEl.innerHTML = `
+            ${statusBadge(firstBadgeText, nextDone)}
+            ${isDeleted ? `<span class="badge badge-danger">削除済</span>` : ``}
+          `;
+        }
       } catch (err) {
         toast({ title: "更新失敗", message: (err && err.message) ? err.message : String(err || "") });
+        // 失敗時だけ元の文言に戻す
+        btn.textContent = prevText;
       } finally {
         btn.dataset.busy = "0";
         btn.disabled = false;
