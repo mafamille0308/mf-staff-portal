@@ -1,5 +1,5 @@
 // js/pages/visits_list.js
-import { render, toast, escapeHtml, showModal } from "../ui.js";
+import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 
@@ -31,26 +31,35 @@ function statusBadge(status, done) {
 
 function cardHtml(v) {
   // v のスキーマはGAS返却に合わせる（不足項目は安全にフォールバック）
-  const start = v.start || v.start_iso || v.start_at || v.start_time || "";
+  const startRaw = v.start || v.start_iso || v.start_at || v.start_time || "";
+  const start = fmtDateTimeJst(startRaw);
   const title = v.title || v.course_name || v.course || v.summary || "(無題)";
   const customer = v.customer_name || v.customer || v.account_name || v.name || "";
   const vid = v.visit_id || v.id || "";
   const done = (v.done === true) || (String(v.is_done || "").toLowerCase() === "true");
-  const status = v.status || v.visit_status || "";
+  const visitType = v.visit_type || v.type || ""; // 互換（正式は visit_type）
+  const billingStatus = v.billing_status || v.request_status || ""; // 移行期間互換
+  const isActive = !(v.is_active === false || String(v.is_active || "").toLowerCase() === "false");
 
   return `
     <div class="card" data-visit-id="${escapeHtml(vid)}" data-done="${done ? "1" : "0"}">
       <div class="card-title">
-        <div>${escapeHtml(start || "")}</div>
-        <div>${escapeHtml(vid || "")}</div>
+      <div>${escapeHtml(displayOrDash(start))}</div>
+      <div>${escapeHtml(displayOrDash(vid))}</div>
       </div>
       <div class="card-sub">
-        <div><strong>${escapeHtml(customer || "(顧客未設定)")}</strong></div>
-        <div>${escapeHtml(title)}</div>
+      <div><strong>${escapeHtml(displayOrDash(customer))}</strong></div>
+      <div>${escapeHtml(displayOrDash(title))}</div>
       </div>
       <div class="badges" data-role="badges">
-        ${statusBadge(status, done)}
-        ${v.is_active === false ? `<span class="badge badge-danger">削除済</span>` : ``}
+      <span class="badge badge-visit-type">
+        ${escapeHtml(displayOrDash(fmt(visitType), "訪問種別未設定"))}
+      </span>
+      <span class="badge badge-billing-status">
+        ${escapeHtml(displayOrDash(fmt(billingStatus), "請求未確定"))}
+      </span>
+        <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}">${done ? "完了" : "未完了"}</span>
+        <span class="badge badge-active ${isActive ? "is-active" : "badge-danger is-inactive"}">${isActive ? "有効" : "削除済"}</span>
       </div>
       <div class="row" style="justify-content:flex-end; margin-top:10px;">
         <button class="btn" type="button" data-action="toggle-done">${done ? "未完了に戻す" : "完了にする"}</button>

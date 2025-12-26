@@ -1,39 +1,34 @@
 // js/pages/visit_detail.js
-import { render, toast, escapeHtml, showModal } from "../ui.js";
-import { callGas } from "../api.js";
+import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
+import { callGas, unwrapOne } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 
-function fmt(v) {
-  if (v == null) return "";
-  return String(v);
-}
+// function fmtDateTimeJst(v) {
+//   const s = fmt(v).trim();
+//   if (!s) return "";
+//   const d = new Date(s);
+//   if (isNaN(d.getTime())) return s; // パースできない場合は原文
+//   try {
+//     return new Intl.DateTimeFormat("ja-JP", {
+//       timeZone: "Asia/Tokyo",
+//       year: "numeric",
+//       month: "2-digit",
+//       day: "2-digit",
+//       hour: "2-digit",
+//       minute: "2-digit",
+//       hour12: false,
+//     }).format(d).replaceAll("-", "/");
+//   } catch {
+//     // Intl が使えない環境向けフォールバック（通常は不要）
+//     const pad = (n) => String(n).padStart(2, "0");
+//     return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+//   }
+// }
 
-function fmtDateTimeJst(v) {
-  const s = fmt(v).trim();
-  if (!s) return "";
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return s; // パースできない場合は原文
-  try {
-    return new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(d).replaceAll("-", "/");
-  } catch {
-    // Intl が使えない環境向けフォールバック（通常は不要）
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-}
-
-function displayOrDash(v) {
-  const s = fmt(v).trim();
-  return s ? s : "—";
-}
+// function displayOrDash(v) {
+//   const s = fmt(v).trim();
+//   return s ? s : "—";
+// }
 
 function section(title, bodyHtml) {
   return `
@@ -93,7 +88,7 @@ export async function renderVisitDetail(appEl, query) {
 
   if (res.ctx) setUser(res.ctx);
 
-  const visit = res.visit || res.result || null;
+  const visit = unwrapOne(res);
   const customerDetail = res.customer_detail || res.customerDetail || null;
 
   if (!visit) {
@@ -114,23 +109,27 @@ export async function renderVisitDetail(appEl, query) {
   const visitHtml = `
     <div class="card">
       <div class="card-title">
-        <div>${escapeHtml(visit.title)}</div>
-        <div>${escapeHtml(fmt(visit.visit_id || ""))}</div>
+      <div class="visit-title">${escapeHtml(displayOrDash(fmt(visit.title)))}</div>
+      <div>${escapeHtml(displayOrDash(fmt(visit.visit_id || "")))}</div>
       </div>
       <div class="row card-meta" style="gap:8px; flex-wrap:wrap;">
-        <span class="badge">${escapeHtml(fmt(visit.visit_type || "")) || "未設定"}</span>
-        <span class="badge ${done ? "badge-ok" : ""}">${done ? "完了" : "未完了"}</span>
-        <span class="badge ${isActive ? "" : "badge-danger"}">${isActive ? "有効" : "削除済"}</span>
+      <span class="badge badge-visit-type">
+        ${escapeHtml(displayOrDash(fmt(visit.visit_type || ""), "訪問種別未設定"))}
+      </span>
+      <span class="badge badge-billing-status">
+        ${escapeHtml(displayOrDash(fmt((visit.billing_status || visit.request_status) || ""), "請求未確定"))}
+      </span>
+        <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}">${done ? "完了" : "未完了"}</span>
+        <span class="badge badge-active ${isActive ? "is-active" : "badge-danger is-inactive"}">${isActive ? "有効" : "削除済"}</span>
       </div>
       <div class="hr"></div>
       <div class="p">
-        <div><strong>開始</strong>：${escapeHtml(startDisp)}</div>
-        <div><strong>終了</strong>：${escapeHtml(endDisp)}</div>
-        <div><strong>コース</strong>：${escapeHtml(displayOrDash(visit.course))}</div>
-        <div><strong>担当者</strong>：${escapeHtml(staffName || displayOrDash(visit.staff_id))}</div>
-        <div><strong>顧客名</strong>：${escapeHtml(customerName || displayOrDash(visit.customer_id))}</div>
-        <div><strong>請求ステータス</strong>：${escapeHtml(displayOrDash(visit.request_status))}</div>
-        <div><strong>メモ</strong>：<span id="memoText">${escapeHtml(displayOrDash(visit.memo))}</span></div>
+      <div><strong>開始</strong>：${escapeHtml(displayOrDash(startDisp))}</div>
+      <div><strong>終了</strong>：${escapeHtml(displayOrDash(endDisp))}</div>
+        <div class="field field-course"><strong>コース</strong>：${escapeHtml(displayOrDash(visit.course))}</div>
+        <div class="field field-staff"><strong>担当者</strong>：${escapeHtml(staffName || displayOrDash(visit.staff_id))}</div>
+        <div class="field field-customer"><strong>顧客名</strong>：${escapeHtml(customerName || displayOrDash(visit.customer_id))}</div>
+        <div class="field field-memo"><strong>メモ</strong>：<span id="memoText" class="memo-text">${escapeHtml(displayOrDash(visit.memo))}</span></div>
         <div class="row" style="gap:8px; margin-top:8px;">
           <button class="btn btn-ghost" type="button" id="btnEditMemo">メモを編集</button>
         </div>

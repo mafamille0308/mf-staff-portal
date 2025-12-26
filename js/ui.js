@@ -69,3 +69,36 @@ export function escapeHtml(s) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+
+// 安全な文字列化（null / undefined / 数値 / boolean 対応）
+export function fmt(v) {
+  if (v == null) return "";
+  return String(v);
+}
+
+// 空値の場合はダッシュ表示（表示用）
+export function displayOrDash(v, dash = "—") {
+  const s = fmt(v).trim();
+  return s ? s : dash;
+}
+
+// JST 日時を人間向けに表示（詳細画面基準）
+// 例: 2025/01/12 14:00
+export function fmtDateTimeJst(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return fmt(v);
+
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    d.getFullYear() +
+    "/" +
+    pad(d.getMonth() + 1) +
+    "/" +
+    pad(d.getDate()) +
+    " " +
+    pad(d.getHours()) +
+    ":" +
+    pad(d.getMinutes())
+  );
+}

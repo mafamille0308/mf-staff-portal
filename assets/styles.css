@@ -138,6 +138,7 @@ body {
   margin-top: 6px; /* ← 少しだけ空ける */
 }
 
+/* badges (future) */
 .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
 .badge {
@@ -147,9 +148,63 @@ body {
   border: 1px solid var(--line);
   color: var(--muted);
   background: rgba(255,255,255,0.02);
+  line-height: 1.2;
+  white-space: nowrap;
 }
+
+@media (max-width: 480px) {
+  .badges {
+    gap: 8px;
+  }
+}
+
 .badge-ok { color: #b6ffd0; border-color: rgba(74,217,123,0.35); }
 .badge-danger { color: #ffc1c1; border-color: rgba(255,92,92,0.35); }
+
+
+.badge-visit-type {
+  color: #b8d7ff;
+  border-color: rgba(90,150,255,0.35);
+  background: rgba(90,150,255,0.08);
+}
+
+.badge-billing-status {
+  color: #ffe2a8;
+  border-color: rgba(255,190,92,0.45);
+  background: rgba(255,190,92,0.10);
+}
+
+.badge-done.is-done {
+  color: #b6ffd0;
+  border-color: rgba(74,217,123,0.45);
+  background: rgba(74,217,123,0.12);
+}
+
+.badge-done.is-not-done {
+  color: var(--muted);
+  border-color: var(--line);
+  background: rgba(255,255,255,0.02);
+}
+
+.badge-active.is-active {
+  color: #c9e3ff;
+  border-color: rgba(120,180,255,0.35);
+  background: rgba(120,180,255,0.08);
+}
+
+.badge-active.is-inactive {
+  color: #ffc1c1;
+  border-color: rgba(255,92,92,0.45);
+  background: rgba(255,92,92,0.10);
+}
+
+/* fields (future) */
+.field {}
+.field-course {}
+.field-staff {}
+.field-customer {}
+.field-memo {}
+.memo-text {}
 
 .hr { height: 1px; background: var(--line); margin: 12px 0; }
 

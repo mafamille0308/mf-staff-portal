@@ -74,3 +74,8 @@ export function unwrapResults(res) {
   const ctx = (res && res.ctx) || null;
   return { results, ctx, raw: res };
 }
+
+export function unwrapOne(res) {
+  if (!res) return null;
+  return res.visit || res.result || res.data || null;
+}
