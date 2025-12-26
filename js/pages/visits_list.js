@@ -1,5 +1,5 @@
 // js/pages/visits_list.js
-import { render, toast, escapeHtml } from "../ui.js";
+import { render, toast, escapeHtml, showModal } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 
@@ -39,7 +39,7 @@ function cardHtml(v) {
   const status = v.status || v.visit_status || "";
 
   return `
-    <div class="card" data-visit-id="${escapeHtml(vid)}">
+    <div class="card" data-visit-id="${escapeHtml(vid)}" data-done="${done ? "1" : "0"}">
       <div class="card-title">
         <div>${escapeHtml(start || "")}</div>
         <div>${escapeHtml(vid || "")}</div>
@@ -53,7 +53,8 @@ function cardHtml(v) {
         ${v.is_active === false ? `<span class="badge badge-danger">削除済</span>` : ``}
       </div>
       <div class="row" style="justify-content:flex-end; margin-top:10px;">
-        <button class="btn btn-ghost" type="button" data-action="open">詳細（次）</button>
+        <button class="btn" type="button" data-action="toggle-done">${done ? "未完了に戻す" : "完了にする"}</button>
+        <button class="btn btn-ghost" type="button" data-action="open">詳細</button>
       </div>
     </div>
   `;
@@ -80,51 +81,116 @@ export async function renderVisitsList(appEl, query) {
   const listEl = appEl.querySelector("#visitsList");
   if (!listEl) return;
 
-  listEl.innerHTML = `<p class="p">読み込み中...</p>`;
+  const fetchAndRender_ = async () => {
+    listEl.innerHTML = `<p class="p">読み込み中...</p>`;
 
-  const idToken = getIdToken();
-  if (!idToken) {
-    listEl.innerHTML = `<p class="p">ログインしてください。</p>`;
-    return;
-  }
+    const idToken = getIdToken();
+    if (!idToken) {
+      listEl.innerHTML = `<p class="p">ログインしてください。</p>`;
+      return;
+    }
 
-  // listVisits 呼び出し（直近2週間）
-  const res = await callGas({
-    action: "listVisits",
-    date_from,
-    date_to,
-  }, idToken);
+    let res;
+    try {
+      res = await callGas({
+        action: "listVisits",
+        id_token: idToken,
+        date_from,
+        date_to,
+      });
+    } catch (err) {
+      const msg = err?.message || String(err || "");
+      toast({ title: "取得失敗", message: msg });
+      listEl.innerHTML = `<p class="p">取得に失敗しました。</p>`;
+      return;
+    }
 
-  console.log("listVisits raw resp:", res);
+    // 配列/オブジェクト両対応で results と ctx を取り出す
+    const { results: visits, ctx } = unwrapResults(res);
 
-  // 失敗時は 0件表示にせず、明確にエラー表示
-  if (!res || res.success === false) {
-    const msg = (res && (res.error || res.message)) || "listVisits failed";
-    listEl.innerHTML = `<p class="p">取得に失敗しました：${escapeHtml(msg)}</p>`;
-    toast({ title: "取得失敗", message: msg });
-    return;
-  }
+    // ctx があればログインユーザー情報を更新
+    if (ctx) setUser(ctx);
 
-  // 配列/オブジェクト両対応で results と ctx を取り出す
-  const { results: visits, ctx } = unwrapResults(res);
+    // 返却が配列パターン / オブジェクトパターン両対応
+    if (!Array.isArray(visits) || visits.length === 0) {
+      listEl.innerHTML = `<p class="p">対象期間の予約がありません。</p>`;
+      return;
+    }
 
-  // ctx があればログインユーザー情報を更新
-  if (ctx) setUser(ctx);
+    listEl.innerHTML = visits.map(cardHtml).join("");
+  };
 
-  // 返却が配列パターン / オブジェクトパターン両対応
-  if (!Array.isArray(visits) || visits.length === 0) {
-    listEl.innerHTML = `<p class="p">対象期間の予約がありません。</p>`;
-    return;
-  }
+  await fetchAndRender_();
 
-  listEl.innerHTML = visits.map(cardHtml).join("");
-
-  // 詳細（次段で実装）
-  listEl.addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-action='open']");
+  // カード内アクション（詳細 / 完了切替）
+  listEl.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-action]");
     if (!btn) return;
+
     const card = e.target.closest(".card");
     const vid = card?.dataset?.visitId;
-    toast({ title: "未実装", message: `詳細画面は次段で追加します（visit_id=${vid || ""}）` });
+    if (!vid) return;
+
+    const action = btn.dataset.action;
+
+    if (action === "open") {
+      location.hash = `#/visits?id=${encodeURIComponent(vid)}`;
+      return;
+    }
+
+    if (action === "toggle-done") {
+      // 二重送信防止
+      if (btn.disabled || btn.dataset.busy === "1") return;
+
+      const currentDone = card?.dataset?.done === "1";
+      const nextDone = !currentDone;
+
+      const ok = await showModal({
+        title: "確認",
+        bodyHtml: `<p class="p">予約 <strong>${escapeHtml(vid)}</strong> を「${nextDone ? "完了" : "未完了"}」に変更します。よろしいですか？</p>`,
+        okText: nextDone ? "完了にする" : "未完了に戻す",
+        cancelText: "キャンセル",
+        danger: false,
+      });
+      if (!ok) return;
+
+      const prevText = btn.textContent;
+      btn.dataset.busy = "1";
+      btn.disabled = true;
+      btn.textContent = "更新中...";
+
+      try {
+        const idToken = getIdToken();
+        if (!idToken) {
+          toast({ title: "未ログイン", message: "再ログインしてください。" });
+          return;
+        }
+
+        const res = await callGas({
+          action: "updateVisit",
+          id_token: idToken,
+          source: "portal",
+          origin: "portal",
+          visit_id: vid,
+          fields: { is_done: nextDone },
+          // 既定どおり sync_calendar=true（doneはカレンダー側の表示にも反映したい）
+        });
+
+        if (!res || res.success === false) {
+          throw new Error((res && res.error) || "更新に失敗しました。");
+        }
+
+        toast({ title: "更新完了", message: `「${nextDone ? "完了" : "未完了"}」に更新しました。` });
+
+        // 取り違え防止のため、必ず最新状態を再取得して再描画
+        await fetchAndRender_();
+      } catch (err) {
+        toast({ title: "更新失敗", message: (err && err.message) ? err.message : String(err || "") });
+      } finally {
+        btn.dataset.busy = "0";
+        btn.disabled = false;
+        btn.textContent = prevText;
+      }
+    }
   });
 }

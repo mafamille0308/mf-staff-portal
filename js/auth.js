@@ -40,6 +40,8 @@ export function setIdToken(idToken) {
   if (!t) return;
   _idToken = t;
   sessionStorage.setItem(KEY_ID_TOKEN, t);
+  // ログイン状態変化を通知（router / pages 側の再描画トリガー）
+  window.dispatchEvent(new CustomEvent("mf:auth:changed", { detail: { authed: true } }));
 }
 
 export function getIdToken() {
@@ -57,6 +59,8 @@ export function getIdToken() {
 export function clearIdToken() {
   _idToken = "";
   sessionStorage.removeItem(KEY_ID_TOKEN);
+  // ログイン状態変化を通知
+  window.dispatchEvent(new CustomEvent("mf:auth:changed", { detail: { authed: false } }));
 }
 
 export function getUser() { return _user; }
