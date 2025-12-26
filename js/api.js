@@ -1,5 +1,6 @@
 // js/api.js
 import { CONFIG } from "./config.js";
+import { clearIdToken } from "./auth.js";
 
 function newRequestId() {
   return "web_" + Date.now() + "_" + Math.random().toString(16).slice(2);
@@ -51,6 +52,15 @@ export async function callGas(payload, idToken) {
     throw new ApiError(`HTTP ${resp.status}`, { status: resp.status, detail: json });
   }
   if (json && json.ok === false) {
+    // 認証エラーならtokenを破棄し、再ログインに寄せる
+    const msg = String(json.error || "");
+    if (msg.includes("Invalid id_token") || msg.includes("invalid_token")) {
+      clearIdToken();
+      throw new ApiError("認証の有効期限が切れました。再ログインしてください。", {
+        status: resp.status,
+        detail: json,
+      });
+    }
     throw new ApiError(json.error || "GASでエラーが発生しました。", { status: resp.status, detail: json });
   }
 

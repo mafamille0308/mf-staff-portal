@@ -10,6 +10,31 @@ let _user = null; // { email, role, staff_id, name? } をGASから返す想定�
  */
 const KEY_ID_TOKEN = "mf_id_token";
 
+// JWT(exp)を読み、有効期限切れを判定する
+function _parseJwtPayload(idToken) {
+  try {
+    const s = String(idToken || "");
+    const parts = s.split(".");
+    if (parts.length < 2) return null;
+    // base64url -> base64
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    // padding
+    const pad = b64.length % 4 ? "=".repeat(4 - (b64.length % 4)) : "";
+    const json = atob(b64 + pad);
+    return JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
+}
+
+function _isExpiredIdToken(idToken, skewSeconds = 60) {
+  const p = _parseJwtPayload(idToken);
+  const exp = p && Number(p.exp);
+  if (!exp) return true; // expが読めないtokenは安全側で失効扱い
+  const now = Math.floor(Date.now() / 1000);
+  return exp <= (now + skewSeconds);
+}
+
 export function setIdToken(idToken) {
   const t = String(idToken || "").trim();
   if (!t) return;
@@ -19,6 +44,12 @@ export function setIdToken(idToken) {
 
 export function getIdToken() {
   const t = String(sessionStorage.getItem(KEY_ID_TOKEN) || "").trim();
+  if (!t) return "";
+  // 期限切れ（または期限間近）なら破棄して未ログイン扱いにする
+  if (_isExpiredIdToken(t, 60)) {
+    clearIdToken();
+    return "";
+  }
   if (t && !_idToken) _idToken = t; // 復元時にメモリも同期
   return t;
 }
