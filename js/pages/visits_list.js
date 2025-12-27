@@ -29,6 +29,21 @@ function statusBadge(status, done) {
   return `<span class="badge">未完了</span>`;
 }
 
+function toBool(v) {
+  return v === true || String(v || "").toLowerCase() === "true";
+}
+
+function mergeVisitById(list, visitId, patch) {
+  const id = String(visitId || "");
+  const idx = list.findIndex(v => String(v.visit_id || v.id || "") === id);
+  if (idx < 0) return { list, idx: -1, merged: null };
+  const prev = list[idx] || {};
+  const merged = { ...prev, ...patch };
+  const next = list.slice();
+  next[idx] = merged;
+  return { list: next, idx, merged };
+}
+
 function cardHtml(v) {
   // v のスキーマはGAS返却に合わせる（不足項目は安全にフォールバック）
   const startRaw = v.start || v.start_iso || v.start_at || v.start_time || "";
@@ -90,6 +105,9 @@ export async function renderVisitsList(appEl, query) {
   const listEl = appEl.querySelector("#visitsList");
   if (!listEl) return;
 
+  // 一覧の最新データを保持（toggle後のマージ＆再描画に使う）
+  let visitsState = [];
+
   const fetchAndRender_ = async () => {
     listEl.innerHTML = `<p class="p">読み込み中...</p>`;
 
@@ -125,6 +143,7 @@ export async function renderVisitsList(appEl, query) {
       return;
     }
 
+    visitsState = visits;
     listEl.innerHTML = visits.map(cardHtml).join("");
   };
 
@@ -163,6 +182,8 @@ export async function renderVisitsList(appEl, query) {
       if (!ok) return;
 
       const prevText = btn.textContent;
+      let finalText = prevText;
+      let succeeded = false;
       btn.dataset.busy = "1";
       btn.disabled = true;
       btn.textContent = "更新中...";
@@ -189,32 +210,34 @@ export async function renderVisitsList(appEl, query) {
 
         toast({ title: "更新完了", message: `「${nextDone ? "完了" : "未完了"}」に更新しました。` });
 
-        // 対象カードだけ更新
-        card.dataset.done = nextDone ? "1" : "0";
-        // 成功時の文言を最終確定値にする（finallyで戻さない）
-        btn.textContent = nextDone ? "未完了に戻す" : "完了にする";
+        // ===== マージ方式で state を更新し、カードを cardHtml で再描画 =====
+        // GAS返却が最小でもUIが壊れないよう、既存vに差分だけ上書きする
+        const returned = res.visit || res.result || res.updated || null;
+        const patch = {
+          ...(returned && typeof returned === "object" ? returned : {}),
+          visit_id: vid,
+          is_done: nextDone,
+          done: nextDone,
+        };
 
-        // badgesを差し替え（statusはカードDOMからは取れないので、既存表示を温存しつつ完了バッジだけ反映）
-        // シンプルに badges 全体を statusBadge + (削除済は残す) で再構築する
-        const badgesEl = card.querySelector('[data-role="badges"]');
-        if (badgesEl) {
-          const isDeleted = badgesEl.querySelector(".badge-danger") ? true : false;
-          // いま表示中の status テキストを拾う（完了バッジ以外の先頭badgeをstatus扱い）
-          const firstBadgeText = badgesEl.querySelector(".badge")?.textContent || "";
-          // 完了なら status より完了を優先する既存ロジックに合わせ、status文字列は firstBadgeText を使う
-          badgesEl.innerHTML = `
-            ${statusBadge(firstBadgeText, nextDone)}
-            ${isDeleted ? `<span class="badge badge-danger">削除済</span>` : ``}
-          `;
-        }
+        const r = mergeVisitById(visitsState, vid, patch);
+        visitsState = r.list;
+        const vMerged = r.merged || patch;
+
+        // 成功時の最終ラベル（finallyで戻さない）
+        finalText = nextDone ? "未完了に戻す" : "完了にする";
+        succeeded = true;
+
+        // カードを丸ごと差し替え（バッジ全体を維持）
+        card.outerHTML = cardHtml(vMerged);
       } catch (err) {
         toast({ title: "更新失敗", message: (err && err.message) ? err.message : String(err || "") });
-        // 失敗時だけ元の文言に戻す
-        btn.textContent = prevText;
+        succeeded = false;
+        finalText = prevText;
       } finally {
         btn.dataset.busy = "0";
         btn.disabled = false;
-        btn.textContent = prevText;
+        btn.textContent = finalText;
       }
     }
   });
