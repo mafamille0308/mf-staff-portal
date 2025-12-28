@@ -5,6 +5,9 @@ export const CONFIG = {
   // GIS クライアントID（Webアプリ）
   GOOGLE_CLIENT_ID: "721404541012-sdsefklaglk2801a7qai38ooslon2gj3.apps.googleusercontent.com",
 
+  // 登録タブ：メール解釈API（LLM/OpenAPI）
+  INTERPRETER_URL: "https://github.com/mafamille0308/mf-interpreter-api.git",
+
   // 画面表示用（必要なら）
   APP_NAME: "MF Staff Portal",
 };

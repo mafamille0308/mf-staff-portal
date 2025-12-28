@@ -6,7 +6,7 @@ import { renderVisitsList } from "./pages/visits_list.js";
 import { renderVisitDetail } from "./pages/visit_detail.js";
 import { renderCustomersPlaceholder } from "./pages/customers_list.js";
 import { renderSummaryPlaceholder } from "./pages/summary.js";
-import { renderMailIntakePlaceholder } from "./pages/mail_intake.js";
+import { renderRegisterTab } from "./pages/register.js";
 
 function parseRoute() {
   const hash = location.hash || "#/visits";
@@ -42,7 +42,7 @@ async function route() {
   if (path.startsWith("/visits")) setActiveNav("visits");
   else if (path.startsWith("/customers")) setActiveNav("customers");
   else if (path.startsWith("/summary")) setActiveNav("summary");
-  else if (path.startsWith("/mail-intake")) setActiveNav("mail");
+  else if (path.startsWith("/register")) setActiveNav("register");
   else setActiveNav("");
 
   // 未ログインはログイン画面
@@ -73,8 +73,8 @@ async function route() {
       renderCustomersPlaceholder(app);
     } else if (path === "/summary") {
       renderSummaryPlaceholder(app);
-    } else if (path === "/mail-intake") {
-      renderMailIntakePlaceholder(app);
+    } else if (path === "/register") {
+      renderRegisterTab(app);
     } else {
       render(app, `<section class="section"><h1 class="h1">Not Found</h1><p class="p">${path}</p></section>`);
     }
