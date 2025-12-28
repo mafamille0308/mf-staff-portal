@@ -1,7 +1,7 @@
 // js/pages/visits_list.js
 import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
-import { getIdToken, setUser } from "../auth.js";
+import { getIdToken, setUser, clearIdToken } from "../auth.js";
 import { toggleVisitDone } from "./visit_done_toggle.js";
 
 function toYmd(d) {
@@ -350,6 +350,21 @@ export async function renderVisitsList(appEl, query) {
     } catch (err) {
       const msg = err?.message || String(err || "");
       toast({ title: "取得失敗", message: msg });
+      listEl.innerHTML = `<p class="p">取得に失敗しました。</p>`;
+      return;
+    }
+
+    // ===== 認証エラーは「0件」と誤認しない =====
+    if (res && typeof res === "object" && res.success === false) {
+      const emsg = String(res.error || res.message || "");
+      if (emsg.includes("Invalid id_token")) {
+        try { clearIdToken(); } catch (_) {}
+        toast({ title: "ログイン期限切れ", message: "再ログインしてください。" });
+        listEl.innerHTML = `<p class="p">ログイン期限が切れました。再ログインしてください。</p>`;
+        return;
+      }
+      // その他の失敗もここで表示して戻す
+      toast({ title: "取得失敗", message: emsg || "取得に失敗しました。" });
       listEl.innerHTML = `<p class="p">取得に失敗しました。</p>`;
       return;
     }
