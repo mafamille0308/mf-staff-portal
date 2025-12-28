@@ -2,6 +2,7 @@
 import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
+import { toggleVisitDone } from "./visit_done_toggle.js";
 
 function toYmd(d) {
   const yyyy = d.getFullYear();
@@ -135,12 +136,15 @@ function cardHtml(v) {
       </span>
       <span class="badge badge-billing-status">
         ${escapeHtml(displayOrDash(fmt(billingStatus), "請求未確定"))}
-      </span>
-        <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}">${done ? "完了" : "未完了"}</span>
+        </span>
+        <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}"
+          data-action="toggle-done"
+          style="cursor:pointer;"
+          title="タップで完了/未完了を切り替え"
+        >${done ? "完了" : "未完了"}</span>
         <span class="badge badge-active ${isActive ? "is-active" : "badge-danger is-inactive"}">${isActive ? "有効" : "削除済"}</span>
       </div>
       <div class="row" style="justify-content:flex-end; margin-top:10px;">
-        <button class="btn" type="button" data-action="toggle-done">${done ? "未完了に戻す" : "完了にする"}</button>
         <button class="btn btn-ghost" type="button" data-action="open">詳細</button>
       </div>
     </div>
@@ -448,14 +452,14 @@ export async function renderVisitsList(appEl, query) {
 
   // カード内アクション（詳細 / 完了切替）
   listEl.addEventListener("click", async (e) => {
-    const btn = e.target.closest("button[data-action]");
-    if (!btn) return;
+    const actEl = e.target.closest("[data-action]");
+    if (!actEl) return;
 
     const card = e.target.closest(".card");
     const vid = card?.dataset?.visitId;
     if (!vid) return;
 
-    const action = btn.dataset.action;
+    const action = actEl.dataset.action;
 
     if (action === "open") {
       location.hash = `#/visits?id=${encodeURIComponent(vid)}`;
@@ -463,84 +467,54 @@ export async function renderVisitsList(appEl, query) {
     }
 
     if (action === "toggle-done") {
-      // 二重送信防止
-      if (btn.disabled || btn.dataset.busy === "1") return;
+      // 二重送信防止（spanでも動くよう dataset で統一）
+      if (actEl.dataset.busy === "1") return;
 
       const currentDone = card?.dataset?.done === "1";
-      const nextDone = !currentDone;
-
-      const ok = await showModal({
-        title: "確認",
-        bodyHtml: `<p class="p">予約 <strong>${escapeHtml(vid)}</strong> を「${nextDone ? "完了" : "未完了"}」に変更します。よろしいですか？</p>`,
-        okText: nextDone ? "完了にする" : "未完了に戻す",
-        cancelText: "キャンセル",
-        danger: false,
-      });
-      if (!ok) return;
-
-      const prevText = btn.textContent;
-      let finalText = prevText;
-      let succeeded = false;
-      btn.dataset.busy = "1";
-      btn.disabled = true;
-      btn.textContent = "更新中...";
+      actEl.dataset.busy = "1";
+      const prevText = actEl.textContent;
+      actEl.textContent = "更新中...";
 
       try {
-        const idToken = getIdToken();
-        if (!idToken) {
-          toast({ title: "未ログイン", message: "再ログインしてください。" });
+        const r = await toggleVisitDone({ visitId: vid, currentDone });
+        if (!r.ok) {
+          // キャンセル時は表示を戻すだけ
+          actEl.textContent = prevText;
           return;
         }
 
-        const res = await callGas({
-          action: "updateVisit",
-          source: "portal",
-          origin: "portal",
-          visit_id: vid,
-          fields: { is_done: nextDone },
-          // 既定どおり sync_calendar=true（doneはカレンダー側の表示にも反映したい）
-        }, idToken);
-
-        const { results, ctx } = unwrapResults(raw);
-        if (ctx) setUser(ctx);
-
-        // 失敗の最小判定（ZIP側の仕様に合わせて後で精密化）
-        if (!raw || raw.success === false) {
-          throw new Error((raw && raw.error) || "更新に失敗しました。");
-        }
-
-        toast({ title: "更新完了", message: `「${nextDone ? "完了" : "未完了"}」に更新しました。` });
+        // ===== その場のUIを確実に復帰（再描画が走らない/遅れるケースの保険）=====
+        const nextDone = !!r.nextDone;
+        // card の状態も更新（次回タップ時の currentDone 判定に使う）
+        if (card) card.dataset.done = nextDone ? "1" : "0";
+        // バッジ表示を更新中→完了/未完了へ戻す
+        actEl.textContent = nextDone ? "完了" : "未完了";
+        actEl.classList.toggle("badge-ok", nextDone);
+        actEl.classList.toggle("is-done", nextDone);
+        actEl.classList.toggle("is-not-done", !nextDone);
 
         // ===== マージ方式で state を更新し、カードを cardHtml で再描画 =====
-        // GAS返却が最小でもUIが壊れないよう、既存vに差分だけ上書きする
-        const returned =
-          (raw && (raw.visit || raw.result || raw.updated)) ||
-          (results && (results.visit || results.result || results.updated)) ||
-          null;
         const patch = {
-          ...(returned && typeof returned === "object" ? returned : {}),
+          ...(r.returned && typeof r.returned === "object" ? r.returned : {}),
           visit_id: vid,
           is_done: nextDone,
           done: nextDone,
         };
 
-        const r = mergeVisitById(visitsAll, vid, patch);
-        visitsAll = r.list;
+        const m = mergeVisitById(visitsAll, vid, patch);
+        visitsAll = m.list;
 
-        // 成功時の最終ラベル（finallyで戻さない）
-        finalText = nextDone ? "未完了に戻す" : "完了にする";
-        succeeded = true;
+        // 重要：マージに失敗した場合は内部stateが更新できず、未完了優先ソートが崩れるため再取得
+        if (m.idx < 0) {
+          await fetchAndRender_();
+          return;
+        }
 
-        // 並び順 / フィルタとの整合性を優先して、条件適用後に全体再描画
+        // 並び替え・フィルタ条件を反映（未完了優先の入れ替えはここで発生する）
         applyAndRender_();
-      } catch (err) {
-        toast({ title: "更新失敗", message: (err && err.message) ? err.message : String(err || "") });
-        succeeded = false;
-        finalText = prevText;
+        // applyAndRender_ がDOMを差し替えるので、このactElへ戻し処理は不要
       } finally {
-        btn.dataset.busy = "0";
-        btn.disabled = false;
-        btn.textContent = finalText;
+        actEl.dataset.busy = "0";
       }
     }
   });
