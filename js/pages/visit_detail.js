@@ -2,6 +2,7 @@
 import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
 import { callGas, unwrapOne } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
+import { toggleVisitDone } from "./visit_done_toggle.js";
 
 // function fmtDateTimeJst(v) {
 //   const s = fmt(v).trim();
@@ -119,7 +120,11 @@ export async function renderVisitDetail(appEl, query) {
       <span class="badge badge-billing-status">
         ${escapeHtml(displayOrDash(fmt((visit.billing_status || visit.request_status) || ""), "請求未確定"))}
       </span>
-        <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}">${done ? "完了" : "未完了"}</span>
+        <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}"
+          data-action="toggle-done"
+          style="cursor:pointer;"
+          title="タップで完了/未完了を切り替え"
+        >${done ? "完了" : "未完了"}</span>
         <span class="badge badge-active ${isActive ? "is-active" : "badge-danger is-inactive"}">${isActive ? "有効" : "削除済"}</span>
       </div>
       <div class="hr"></div>
@@ -192,6 +197,38 @@ export async function renderVisitDetail(appEl, query) {
     ${section("予約情報", visitHtml)}
     ${section("顧客・ペット・お世話情報", customerHtml)}
   `;
+
+  // ===== done 切替（バッジタップ）=====
+  host.addEventListener("click", async (e) => {
+    const actEl = e.target.closest('[data-action="toggle-done"]');
+    if (!actEl) return;
+    if (actEl.dataset.busy === "1") return;
+
+    const currentDone = actEl.classList.contains("is-done");
+    actEl.dataset.busy = "1";
+    const prevText = actEl.textContent;
+    actEl.textContent = "更新中...";
+
+    try {
+      const r = await toggleVisitDone({ visitId, currentDone });
+      if (!r.ok) {
+        actEl.textContent = prevText;
+        return;
+      }
+
+      // 表示だけ更新（再取得は後回し：性能最適化フェーズで検討）
+      const nextDone = !!r.nextDone;
+      actEl.textContent = nextDone ? "完了" : "未完了";
+      actEl.classList.toggle("badge-ok", nextDone);
+      actEl.classList.toggle("is-done", nextDone);
+      actEl.classList.toggle("is-not-done", !nextDone);
+    } catch (err) {
+      toast({ title: "更新失敗", message: (err && err.message) ? err.message : String(err || "") });
+      actEl.textContent = prevText;
+    } finally {
+      actEl.dataset.busy = "0";
+    }
+  });
 
   // ===== memo 編集 =====
   const btnEdit = host.querySelector("#btnEditMemo");
