@@ -19,6 +19,7 @@ function nowIsoJst_() {
 
 async function fetchInterpreterToken_() {
   const idToken = getIdToken();
+  console.log("[register] has id_token =", !!idToken, "len=", idToken ? idToken.length : 0);
   if (!idToken) throw new Error("未ログインです（id_tokenがありません）。再ログインしてください。");
   const r = await callGas({ action: "issueInterpreterToken" }, idToken);
   const u = unwrapResults(r);
