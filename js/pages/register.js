@@ -22,7 +22,11 @@ async function fetchInterpreterToken_() {
   console.log("[register] has id_token =", !!idToken, "len=", idToken ? idToken.length : 0);
   if (!idToken) throw new Error("未ログインです（id_tokenがありません）。再ログインしてください。");
   const r = await callGas({ action: "issueInterpreterToken" }, idToken);
+  console.log("[register] issueInterpreterToken raw response =", r);
+
   const u = unwrapResults(r);
+  console.log("[register] issueInterpreterToken unwrapped =", u);
+
   if (!u || !u.ok || !u.token) throw new Error(u && u.error ? u.error : "token issuance failed");
   return u.token;
 }
@@ -140,8 +144,14 @@ export function renderRegisterTab(app) {
     resultEl.innerHTML = "";
 
     try {
+      console.log("[register] step1: before fetchInterpreterToken_");
       const token = await fetchInterpreterToken_();
+      console.log("[register] step2: token issued len=", String(token || "").length);
+
+      console.log("[register] step3: before callInterpreter_");
       const data = await callInterpreter_(token, emailText);
+      console.log("[register] step4: callInterpreter_ ok=", !!(data && data.ok));
+      
       draftEl.value = prettyJson_(data.draft);
 
       const warnings = (data.draft && data.draft.warnings) || [];
