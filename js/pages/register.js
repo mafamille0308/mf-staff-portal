@@ -2,6 +2,7 @@
 import { render, qs, toast, escapeHtml, showModal } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
 import { CONFIG } from "../config.js";
+import { getIdToken } from "../auth.js";
 
 function nowIsoJst_() {
   const d = new Date();
@@ -17,7 +18,9 @@ function nowIsoJst_() {
 }
 
 async function fetchInterpreterToken_() {
-  const r = await callGas({ action: "issueInterpreterToken" });
+  const idToken = getIdToken();
+  if (!idToken) throw new Error("未ログインです（id_tokenがありません）。再ログインしてください。");
+  const r = await callGas({ action: "issueInterpreterToken" }, idToken);
   const u = unwrapResults(r);
   if (!u || !u.ok || !u.token) throw new Error(u && u.error ? u.error : "token issuance failed");
   return u.token;
@@ -121,7 +124,7 @@ export function renderRegisterTab(app) {
     console.log("[register] interpret button clicked");
     if (_busy) return;
     const emailText = String(emailEl.value || "").trim();
-    if (!emailText) return toast("メール本文を貼り付けてください");
+    if (!emailText) return toast({ message: "メール本文を貼り付けてください" });
     setBusy(true);
     resultEl.innerHTML = "";
 
@@ -140,7 +143,7 @@ export function renderRegisterTab(app) {
 
       commitBtn.disabled = false;
     } catch (e) {
-      toast(e && e.message ? e.message : String(e));
+      toast({ message: (e && e.message) ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
@@ -155,17 +158,17 @@ export function renderRegisterTab(app) {
     try {
       draft = JSON.parse(raw);
     } catch (e) {
-      return toast("draft JSON が壊れています（JSONとして解析できません）");
+      return toast({ message: "draft JSON が壊れています（JSONとして解析できません）" });
     }
 
     const visits = Array.isArray(draft.visits) ? draft.visits : [];
-    if (!visits.length) return toast("登録候補が0件です");
+    if (!visits.length) return toast({ message: "登録候補が0件です" });
 
     // 二重送信防止（同一payloadの連続commitをブロック）
     // ※ draftが手修正されればハッシュが変わるので再送可能
     const contentHash = await sha256Hex_(JSON.stringify({ visits }));
     if (_lastCommitSucceeded && _lastCommitHash && _lastCommitHash === contentHash) {
-      return toast("同じ内容の登録はすでに実行済みです（二重送信防止）");
+      return toast({ message: "同じ内容の登録はすでに実行済みです（二重送信防止）" });
     }
 
     // confirm modal（誤操作防止）
@@ -204,10 +207,10 @@ export function renderRegisterTab(app) {
           <pre class="pre mono">${msg}</pre>
         </div>
       `;
-      toast("登録処理が完了しました（結果を確認してください）");
+      toast({ title: "完了", message: "登録処理が完了しました（結果を確認してください）" });
     } catch (e) {
       _lastCommitSucceeded = false;
-      toast(e && e.message ? e.message : String(e));
+      toast({ message: (e && e.message) ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
