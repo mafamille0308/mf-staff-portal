@@ -7,7 +7,7 @@ export const CONFIG = {
 
   // 登録タブ：メール解釈API（LLM/OpenAPI）
   // Cloud Run /interpret
-  INTERPRETER_URL: "https://mf-interpreter-721404541012.asia-northeast1.run.app",
+  INTERPRETER_URL: "https://mf-interpreter-721404541012.asia-northeast1.run.app/interpret",
 
   // 画面表示用（必要なら）
   APP_NAME: "MF Staff Portal",
