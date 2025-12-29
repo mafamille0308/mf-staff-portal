@@ -129,6 +129,8 @@ export function renderRegisterTab(app) {
 
   interpretBtn.addEventListener("click", async () => {
     console.log("[register] interpret button clicked");
+    console.log("[register] emailEl exists =", !!emailEl);
+    console.log("[register] emailEl value =", emailEl && emailEl.value);
     if (_busy) return;
     const emailText = String(emailEl.value || "").trim();
     if (!emailText) return toast({ message: "メール本文を貼り付けてください" });
