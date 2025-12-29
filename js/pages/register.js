@@ -27,7 +27,7 @@ async function fetchInterpreterToken_() {
 }
 
 async function callInterpreter_(token, emailText) {
-  console.log("[register] callInterpreter_ start", CONFIG.INTERPRETER_URL);
+  console.log("[register] CONFIG.INTERPRETER_URL =", CONFIG.INTERPRETER_URL);
   if (!CONFIG.INTERPRETER_URL || CONFIG.INTERPRETER_URL.includes("YOUR_CLOUD_RUN_URL")) {
     throw new Error("INTERPRETER_URL is not set");
   }
@@ -42,6 +42,12 @@ async function callInterpreter_(token, emailText) {
       slot_minutes: 15,
     },
   };
+
+  console.log("[register] about to POST /interpret", {
+    url: CONFIG.INTERPRETER_URL,
+    hasToken: !!token,
+    bodyPreview: body,
+  });
 
   const resp = await fetch(CONFIG.INTERPRETER_URL, {
     method: "POST",
