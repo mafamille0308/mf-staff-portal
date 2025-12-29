@@ -60,6 +60,20 @@ function prettyJson_(obj) {
   return JSON.stringify(obj, null, 2);
 }
 
+async function sha256Hex_(text) {
+  // Web Crypto API（https環境前提 / GitHub PagesでOK）
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest("SHA-256", enc.encode(text));
+  const bytes = Array.from(new Uint8Array(buf));
+  return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function newRequestId_() {
+  // GAS側 RequestLogs / 冪等設計に乗せる（再送は同一request_idを使う）
+  const rid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+  return `portal_register_${rid}`;
+}
+
 export function renderRegisterTab(app) {
   render(app, `
     <section class="section">
@@ -87,6 +101,10 @@ export function renderRegisterTab(app) {
   const resultEl = qs("#reg_result");
 
   let _busy = false;
+
+  let _lastCommitHash = "";
+  let _lastCommitRequestId = "";
+  let _lastCommitSucceeded = false;
 
   function setBusy(b) {
     _busy = b;
@@ -141,6 +159,13 @@ export function renderRegisterTab(app) {
     const visits = Array.isArray(draft.visits) ? draft.visits : [];
     if (!visits.length) return toast("登録候補が0件です");
 
+    // 二重送信防止（同一payloadの連続commitをブロック）
+    // ※ draftが手修正されればハッシュが変わるので再送可能
+    const contentHash = await sha256Hex_(JSON.stringify({ visits }));
+    if (_lastCommitSucceeded && _lastCommitHash && _lastCommitHash === contentHash) {
+      return toast("同じ内容の登録はすでに実行済みです（二重送信防止）");
+    }
+
     // confirm modal（誤操作防止）
     const ok = await showModal({
       title: "登録実行の確認",
@@ -154,13 +179,22 @@ export function renderRegisterTab(app) {
     resultEl.innerHTML = "";
 
     try {
+      // 再送（通信失敗時など）は同一 request_id を維持する
+      if (!_lastCommitRequestId || _lastCommitHash !== contentHash) {
+        _lastCommitRequestId = newRequestId_();
+      }
+      _lastCommitHash = contentHash;
+
       const resp = await callGas({
         action: "bulkRegisterVisits",
+        request_id: _lastCommitRequestId,
+        content_hash: _lastCommitHash,
         visits: visits,
         source: "portal_register",
       });
 
       const u = unwrapResults(resp);
+      _lastCommitSucceeded = !!(u && u.success !== false);
       const msg = escapeHtml(prettyJson_(u));
       resultEl.innerHTML = `
         <div class="card">
@@ -170,6 +204,7 @@ export function renderRegisterTab(app) {
       `;
       toast("登録処理が完了しました（結果を確認してください）");
     } catch (e) {
+      _lastCommitSucceeded = false;
       toast(e && e.message ? e.message : String(e));
     } finally {
       setBusy(false);
