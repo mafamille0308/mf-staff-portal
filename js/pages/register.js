@@ -2,7 +2,7 @@
 import { render, qs, toast, escapeHtml, showModal } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
 import { CONFIG } from "../config.js";
-import { getIdToken } from "../auth.js";
+import { getIdToken, getUser } from "../auth.js";
 
 function nowIsoJst_() {
   const d = new Date();
@@ -39,6 +39,16 @@ async function callInterpreter_(token, emailText) {
   if (!CONFIG.INTERPRETER_URL || CONFIG.INTERPRETER_URL.includes("YOUR_CLOUD_RUN_URL")) {
     throw new Error("INTERPRETER_URL is not set");
   }
+
+  const user = getUser() || {};
+  if (!user || !user.staff_id) {
+    toast("スタッフ情報が取得できません。再ログインしてください。");
+    return;
+  }
+  const staffId = user.staff_id || "";
+  const staffName = user.name || "";
+  const isAdmin = user.role === "admin";
+
   const body = {
     op: "interpret_register_visits_v1",
     email_text: emailText,
@@ -48,6 +58,9 @@ async function callInterpreter_(token, emailText) {
       latest_end_time: "19:00",
       slide_limit_unspecified: "18:30",
       slot_minutes: 15,
+      // staffは「解釈対象」ではなく「実行制約」
+      staff_id: isAdmin ? "" : staffId,
+      staff_name: isAdmin ? "" : staffName,
     },
   };
 
@@ -98,7 +111,24 @@ export function renderRegisterTab(app) {
       <h1 class="h1">予約登録（draft → commit）</h1>
 
       <label class="label">メール本文</label>
-      <textarea id="reg_email" class="textarea" rows="8" placeholder="ここにメール本文を貼り付け"></textarea>
+      <textarea id="reg_email" class="textarea" rows="10" placeholder="依頼文を貼りつけ"></textarea>
+
+      <label class="label" style="margin-top:12px;">補足（任意）</label>
+      <textarea id="reg_hint" class="textarea" rows="7"
+        placeholder="例：訪問日時：（12/31〜1/2）
+        例：訪問回数：（合計5回 / 1日2回）
+        例：訪問時間：（朝 / 夜 / 14時）
+        例：訪問タイプ：（シッティング / トレーニング / 打ち合わせ / 有料打ち合わせ）
+        例：メモ：（12/31：鍵は郵送返却）"
+      >▼補足が必要な場合▼
+      顧客名：
+      担当者名：
+      訪問日時：
+      訪問回数：
+      訪問時間：
+      訪問タイプ：
+      メモ：
+      </textarea>
 
       <div class="row">
         <button id="reg_interpret" class="btn">解釈（draft生成）</button>
@@ -113,6 +143,7 @@ export function renderRegisterTab(app) {
   `);
 
   const emailEl = qs("#reg_email");
+  const hintEl  = qs("#reg_hint");
   const draftEl = qs("#reg_draft");
   const interpretBtn = qs("#reg_interpret");
   const commitBtn = qs("#reg_commit");
@@ -143,6 +174,14 @@ export function renderRegisterTab(app) {
     if (_busy) return;
     const emailText = String(emailEl.value || "").trim();
     if (!emailText) return toast({ message: "メール本文を貼り付けてください" });
+
+    const hintText = hintEl ? String(hintEl.value || "").trim() : "";
+    // 補足は「ラベルだけ」でも送る設計（あなたの狙いどおり）
+    // ただし、完全空なら送らない（ユーザーが全消しした場合）
+    const mergedText = hintText
+      ? `${emailText}\n\n${hintText}\n`
+      : emailText;
+
     setBusy(true);
     resultEl.innerHTML = "";
 
@@ -152,7 +191,7 @@ export function renderRegisterTab(app) {
       console.log("[register] step2: token issued len=", String(token || "").length);
 
       console.log("[register] step3: before callInterpreter_");
-      const data = await callInterpreter_(token, emailText);
+      const data = await callInterpreter_(token, mergedText);
       console.log("[register] step4: callInterpreter_ ok=", !!(data && data.ok));
 
       draftEl.value = prettyJson_(data.draft);
