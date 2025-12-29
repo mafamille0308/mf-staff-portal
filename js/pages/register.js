@@ -24,11 +24,14 @@ async function fetchInterpreterToken_() {
   const r = await callGas({ action: "issueInterpreterToken" }, idToken);
   console.log("[register] issueInterpreterToken raw response =", r);
 
-  const u = unwrapResults(r);
-  console.log("[register] issueInterpreterToken unwrapped =", u);
+  const raw = r && r.raw ? r.raw : r;
+  console.log("[register] issueInterpreterToken =", raw);
 
-  if (!u || !u.ok || !u.token) throw new Error(u && u.error ? u.error : "token issuance failed");
-  return u.token;
+  if (!raw || !raw.ok || !raw.token) {
+    throw new Error(raw && raw.error ? raw.error : "token issuance failed");
+  }
+
+  return raw.token;
 }
 
 async function callInterpreter_(token, emailText) {
@@ -151,7 +154,7 @@ export function renderRegisterTab(app) {
       console.log("[register] step3: before callInterpreter_");
       const data = await callInterpreter_(token, emailText);
       console.log("[register] step4: callInterpreter_ ok=", !!(data && data.ok));
-      
+
       draftEl.value = prettyJson_(data.draft);
 
       const warnings = (data.draft && data.draft.warnings) || [];
