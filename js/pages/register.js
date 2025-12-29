@@ -24,6 +24,7 @@ async function fetchInterpreterToken_() {
 }
 
 async function callInterpreter_(token, emailText) {
+  console.log("[register] callInterpreter_ start", CONFIG.INTERPRETER_URL);
   if (!CONFIG.INTERPRETER_URL || CONFIG.INTERPRETER_URL.includes("YOUR_CLOUD_RUN_URL")) {
     throw new Error("INTERPRETER_URL is not set");
   }
@@ -117,6 +118,7 @@ export function renderRegisterTab(app) {
   });
 
   interpretBtn.addEventListener("click", async () => {
+    console.log("[register] interpret button clicked");
     if (_busy) return;
     const emailText = String(emailEl.value || "").trim();
     if (!emailText) return toast("メール本文を貼り付けてください");
