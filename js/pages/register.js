@@ -120,7 +120,9 @@ export function renderRegisterTab(app) {
   function setBusy(b) {
     _busy = b;
     interpretBtn.disabled = b;
-    commitBtn.disabled = b || !draftEl.value.trim();
+    if (commitBtn) {
+      commitBtn.disabled = b || !draftEl.value.trim();
+    }
   }
 
   draftEl.addEventListener("input", () => {
