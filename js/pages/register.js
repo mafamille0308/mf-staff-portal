@@ -48,11 +48,15 @@ async function fetchInterpreterToken_() {
 
 async function callInterpreter_(token, emailText) {
   console.log("[register] CONFIG.INTERPRETER_URL =", CONFIG.INTERPRETER_URL);
+  console.log("[register] callInterpreter_: enter", { hasToken: !!token, tokenLen: token ? String(token).length : 0, emailLen: emailText ? String(emailText).length : 0 });
   if (!CONFIG.INTERPRETER_URL || CONFIG.INTERPRETER_URL.includes("YOUR_CLOUD_RUN_URL")) {
     throw new Error("INTERPRETER_URL is not set");
   }
 
+  console.log("[register] callInterpreter_: before getUser()");
   const user = getUser() || {};
+  console.log("[register] callInterpreter_: after getUser()", { hasUser: !!user, hasStaffId: !!user.staff_id, role: user.role || "" });
+
   if (!user || !user.staff_id) {
     toast({ message: "スタッフ情報が取得できません。ログインしてください。" });
     throw new Error("staff missing");
@@ -61,6 +65,7 @@ async function callInterpreter_(token, emailText) {
   const staffName = user.name || "";
   const isAdmin = user.role === "admin";
 
+  console.log("[register] callInterpreter_: build body (meta only)");
   const body = {
     op: "interpret_register_visits_v1",
     email_text: emailText,
@@ -75,6 +80,14 @@ async function callInterpreter_(token, emailText) {
       staff_name: isAdmin ? "" : staffName,
     },
   };
+
+  console.log("[register] callInterpreter_: about to fetch", {
+    url: CONFIG.INTERPRETER_URL,
+    hasAuthHeader: !!token,
+    op: body.op,
+    tz: body.tz,
+    now_iso: body.now_iso,
+  });
 
   console.log("[register] about to POST /interpret", {
     url: CONFIG.INTERPRETER_URL,
