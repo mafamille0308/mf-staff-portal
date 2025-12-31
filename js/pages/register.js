@@ -2,7 +2,7 @@
 import { render, qs, toast, escapeHtml, showModal } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
 import { CONFIG } from "../config.js";
-import { getIdToken, getUser } from "../auth.js";
+import { getIdToken, getUser, setUser } from "../auth.js";
 
 const VISIT_TYPE_LABELS = {
   sitting: "シッティング",
@@ -42,6 +42,8 @@ async function fetchInterpreterToken_() {
   if (!raw || !raw.ok || !raw.token) {
     throw new Error(raw && raw.error ? raw.error : "token issuance failed");
   }
+
+  if (raw && raw.ctx) setUser(raw.ctx);
 
   return raw.token;
 }
