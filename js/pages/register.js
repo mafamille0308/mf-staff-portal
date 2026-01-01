@@ -89,6 +89,7 @@ async function callInterpreter_(token, emailText) {
   const staffId = user.staff_id || "";
   const staffName = user.staff_name || user.name || "";
   const isAdmin = user.role === "admin";
+  const adminAssignStaffName = (document.getElementById("reg_assign_staff_name")?.value || "").trim();
 
   console.log("[register] callInterpreter_: build body (meta only)");
   const body = {
@@ -103,7 +104,7 @@ async function callInterpreter_(token, emailText) {
       // staffは「解釈対象」ではなく「実行制約」
       // admin は「登録先スタッフ」を指定した場合のみ constraints に渡す（未指定は主担当をGAS側で決定）
       staff_id: (!isAdmin) ? staffId : "",
-      staff_name: (!isAdmin) ? staffName : String(adminAssignStaffName || "").trim(),
+      staff_name: (!isAdmin) ? staffName : adminAssignStaffName,
     },
   };
 
