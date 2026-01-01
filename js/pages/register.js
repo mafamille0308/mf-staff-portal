@@ -24,6 +24,29 @@ function nowIsoJst_() {
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}+09:00`;
 }
 
+function pad2_(n) {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * start_time/end_time の表示用（HH:mm）
+ * - "09:00" のような時刻文字列はそのまま採用
+ * - "2026-01-02T09:00:00+09:00" のようなISOは Date で解釈し HH:mm にする
+ * - 変換不能なら空文字
+ */
+function fmtHm_(t) {
+  const s = String(t || "").trim();
+  if (!s) return "";
+  if (/^\d{1,2}:\d{2}$/.test(s)) {
+    // "9:00" も "09:00" に寄せる
+    const [h, m] = s.split(":");
+    return `${pad2_(h)}:${m}`;
+  }
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "";
+  return `${pad2_(d.getHours())}:${pad2_(d.getMinutes())}`;
+}
+
 async function fetchInterpreterToken_() {
   const idToken = getIdToken();
   console.log("[register] has id_token =", !!idToken, "len=", idToken ? idToken.length : 0);
@@ -64,7 +87,7 @@ async function callInterpreter_(token, emailText) {
     throw new Error("staff missing");
   }
   const staffId = user.staff_id || "";
-  const staffName = user.name || "";
+  const staffName = user.staff_name || user.name || "";
   const isAdmin = user.role === "admin";
 
   console.log("[register] callInterpreter_: build body (meta only)");
@@ -78,8 +101,9 @@ async function callInterpreter_(token, emailText) {
       slide_limit_unspecified: "18:30",
       slot_minutes: 15,
       // staffは「解釈対象」ではなく「実行制約」
-      staff_id: isAdmin ? "" : staffId,
-      staff_name: isAdmin ? "" : staffName,
+      // admin は「登録先スタッフ」を指定した場合のみ constraints に渡す（未指定は主担当をGAS側で決定）
+      staff_id: (!isAdmin) ? staffId : "",
+      staff_name: (!isAdmin) ? staffName : String(adminAssignStaffName || "").trim(),
     },
   };
 
@@ -142,6 +166,33 @@ function prettyJson_(obj) {
   return JSON.stringify(obj, null, 2);
 }
 
+function renderCommitSummary_(u) {
+  // 可能な範囲で人間向けに要点だけ表示（詳細はJSONを参照）
+  if (!u) return "";
+
+  const results = Array.isArray(u.results) ? u.results : [];
+  if (!results.length) return "";
+
+  const items = results
+    .filter(r => r && (r.status === "failed" || r.status === "skipped"))
+    .map(r => {
+      const code = escapeHtml(r.code || r.status || "");
+      const row = (r.row != null) ? `#${escapeHtml(String(r.row))}` : "";
+      const reason = escapeHtml(r.reason || "");
+      return `<li style="margin:4px 0;"><b>${code}</b> ${row} ${reason}</li>`;
+    })
+    .join("");
+
+  if (!items) return "";
+
+  return `
+    <div class="card card-warning" style="margin-bottom:12px;">
+      <p class="p text-danger"><b>登録できなかった行があります</b></p>
+      <ul style="margin:6px 0 0 18px; padding:0;">${items}</ul>
+    </div>
+  `;
+}
+
 async function sha256Hex_(text) {
   // Web Crypto API：https環境 / GitHub PagesでOK
   const enc = new TextEncoder();
@@ -175,12 +226,12 @@ export function renderRegisterTab(app) {
           <input id="reg_hint_customer" class="input" placeholder="例：佐藤 花子" />
         </div>
         <div class="hint-row">
-          <div class="hint-label">ペット情報：</div>
-          <input id="reg_hint_pet" class="input" placeholder="例：犬（柴） / ぽち / 8kg" />
+          <div class="hint-label">顧客特定ヒント：</div>
+          <input id="reg_hint_customer_info" class="input" placeholder="例：青葉区○○ / ぽち / マンション名 / 電話末尾1234 など" />
         </div>
         <div class="hint-row">
-          <div class="hint-label">訪問日時：</div>
-          <input id="reg_hint_date" class="input" placeholder="例：3/2 午前 / 3/3 14:00 など" />
+          <div class="hint-label">訪問期間：</div>
+          <input id="reg_hint_date" class="input" placeholder="例：2026-01-01 - 2026-01-05（または 1/1 - 1/5）" />
         </div>
         <div class="hint-row">
           <div class="hint-label">訪問回数：</div>
@@ -188,7 +239,7 @@ export function renderRegisterTab(app) {
         </div>
         <div class="hint-row">
           <div class="hint-label">訪問時間：</div>
-          <input id="reg_hint_time" class="input" placeholder="例：朝 / 夕方 / 14時など" />
+          <input id="reg_hint_time" class="input" placeholder="例：朝 / 夕方 / 14時 / 1/1は夜 など" />
         </div>
         <div class="hint-row">
           <div class="hint-label">訪問タイプ：</div>
@@ -199,6 +250,21 @@ export function renderRegisterTab(app) {
           <textarea id="reg_hint_memo" class="textarea" rows="2" placeholder="例：鍵はポスト返却。給餌は1日2回。"></textarea>
         </div>
         <p class="p text-sm text-muted" style="margin-top:6px;">補足項目は入力がある場合のみ添付します。</p>
+      </div>
+
+      <div id="reg_assign" class="card is-hidden" style="margin-top:12px;">
+        <p class="p"><b>登録先スタッフ（管理者のみ）</b></p>
+        <div class="hint-row">
+          <div class="hint-label">スタッフ名：</div>
+          <input id="reg_assign_staff_name" class="input" placeholder="未入力の場合は「顧客の主担当」に登録します" />
+        </div>
+        <p class="p text-sm text-muted" style="margin-top:6px;">
+          登録先は GAS 側で担当関係（CustomerStaffs）を確認します。担当関係がない場合は登録できません。
+        </p>
+      </div>
+
+      <div id="reg_assign_summary" class="card" style="margin-top:12px;">
+        <p class="p"><b>登録先</b>：<span id="reg_assign_summary_text">（未ログイン）</span></p>
       </div>
 
       <div class="row">
@@ -226,12 +292,15 @@ export function renderRegisterTab(app) {
 
   const emailEl = qs("#reg_email");
   const hintCustomerEl = qs("#reg_hint_customer");
-  const hintPetEl = qs("#reg_hint_pet");
+  const hintCustomerInfoEl = qs("#reg_hint_customer_info");
   const hintDateEl = qs("#reg_hint_date");
   const hintCountEl = qs("#reg_hint_count");
   const hintTimeEl = qs("#reg_hint_time");
   const hintTypeEl = qs("#reg_hint_type");
   const hintMemoEl = qs("#reg_hint_memo");
+  const assignWrapEl = qs("#reg_assign");
+  const assignStaffNameEl = qs("#reg_assign_staff_name");
+  const assignSummaryTextEl = qs("#reg_assign_summary_text");
   const draftEl = qs("#reg_draft");
   const interpretBtn = qs("#reg_interpret");
   const commitBtn = qs("#reg_commit");
@@ -248,6 +317,29 @@ export function renderRegisterTab(app) {
   let _lastCommitHash = "";
   let _lastCommitRequestId = "";
   let _lastCommitSucceeded = false;
+
+  updateAssignUi_();
+  window.addEventListener("mf:auth:changed", updateAssignUi_);
+  if (assignStaffNameEl) assignStaffNameEl.addEventListener("input", updateAssignUi_);
+
+  function updateAssignUi_() {
+    const user = getUser() || {};
+    const role = String(user.role || "").toLowerCase();
+    const me = (user.name || user.staff_id || "自分");
+    const isAdmin = role === "admin";
+
+    if (assignWrapEl) {
+      if (isAdmin) assignWrapEl.classList.remove("is-hidden");
+      else assignWrapEl.classList.add("is-hidden");
+    }
+
+    const selectedName = (assignStaffNameEl && String(assignStaffNameEl.value || "").trim()) || "";
+    let label = "";
+    if (!role) label = "（未ログイン）";
+    else if (isAdmin) label = selectedName ? `${selectedName} に登録（担当関係がある場合のみ）` : "顧客の主担当に登録（GASで決定）";
+    else label = `自分に登録（${me}）`;
+    if (assignSummaryTextEl) assignSummaryTextEl.textContent = label;
+  }
 
   function setBusy(b, overlayText = "") {
     _busy = b;
@@ -297,7 +389,10 @@ export function renderRegisterTab(app) {
     }
     const html = visits.map((v, idx) => {
       const date = escapeHtml(v.date || "");
-      const time = escapeHtml([v.start_time || "", v.end_time || ""].filter(Boolean).join(" - "));
+      const st = fmtHm_(v.start_time);
+      const ed = fmtHm_(v.end_time);
+      const timeRaw = [st, ed].filter(Boolean).join(" - ");
+      const time = escapeHtml(timeRaw);
       const customer = escapeHtml(v.customer_name || "");
       const staff = escapeHtml(v.staff_name || v.staff_id || "");
       const type = escapeHtml(fmtVisitType_(v.visit_type));
@@ -394,7 +489,7 @@ export function renderRegisterTab(app) {
   function buildHintText_() {
     const hints = [
       { label: "顧客名", el: hintCustomerEl },
-      { label: "ペット情報", el: hintPetEl },
+      { label: "ペット情報", el: hintCustomerInfoEl },
       { label: "訪問日時", el: hintDateEl },
       { label: "訪問回数", el: hintCountEl },
       { label: "訪問時間", el: hintTimeEl },
@@ -406,7 +501,7 @@ export function renderRegisterTab(app) {
       .filter(({ value }) => !!value)
       .map(({ label, value }) => `${label}：${value}`);
     if (!lines.length) return "";
-    return `▼補足が必要な場合▼\n${lines.join("\n")}`;
+    return `補足が必要な場合\n${lines.join("\n")}`;
   }
 
   function parseDraftFromTextarea_() {
@@ -459,7 +554,29 @@ export function renderRegisterTab(app) {
       if (!idToken) throw new Error("未ログインです。ログインし直してください。");
       const resp = await callGas({ action: "searchCustomers", query: name }, idToken);
       const { results } = unwrapResults(resp);
-      renderCustomerCandidates_({ status: "loaded", name, results: results || [] });
+      let list = results || [];
+
+      // 顧客特定ヒントがあれば、候補が複数のときだけ「一致度順」に並べ替える
+      // 例: 住所の一部 / 建物名 / 電話末尾 など
+      const hint = String(hintCustomerInfoEl?.value || "").trim();
+      if (hint && Array.isArray(list) && list.length > 1) {
+        const h = hint.toLowerCase();
+        list = list
+          .map((r) => {
+            const addr = String(r.address_full || r.address || "").toLowerCase();
+            const phone = String(r.phone || "").toLowerCase();
+            const notes = String(r.notes || r.memo || "").toLowerCase();
+            const score =
+              (addr.includes(h) ? 3 : 0) +
+              (phone.includes(h) ? 2 : 0) +
+              (notes.includes(h) ? 1 : 0);
+            return { r, score };
+          })
+          .sort((a, b) => (b.score - a.score))
+          .map((x) => x.r);
+      }
+
+      renderCustomerCandidates_({ status: "loaded", name, results: list });
     } catch (e) {
       renderCustomerCandidates_({ status: "error", name, error: (e && e.message) ? e.message : String(e) });
     }
@@ -488,7 +605,8 @@ export function renderRegisterTab(app) {
       console.log("[register] step2: token issued len=", String(token || "").length);
 
       console.log("[register] step3: before callInterpreter_");
-      const data = await callInterpreter_(token, mergedText);
+      const adminAssignStaffName = (assignStaffNameEl && String(assignStaffNameEl.value || "").trim()) || "";
+      const data = await callInterpreter_(token, mergedText, adminAssignStaffName);
       console.log("[register] step4: callInterpreter_ ok=", !!(data && data.ok));
 
       draftEl.value = prettyJson_(data.draft);
@@ -560,8 +678,10 @@ export function renderRegisterTab(app) {
 
       const u = unwrapResults(resp);
       _lastCommitSucceeded = !!(u && u.success !== false);
+      const summaryHtml = renderCommitSummary_(u);
       const msg = escapeHtml(prettyJson_(u));
       resultEl.innerHTML = `
+        ${summaryHtml}
         <div class="card">
           <p class="p"><b>完了</b></p>
           <pre class="pre mono">${msg}</pre>
