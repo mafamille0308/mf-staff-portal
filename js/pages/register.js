@@ -330,7 +330,7 @@ export function renderRegisterTab(app) {
           <summary style="cursor:pointer; font-weight:600; color:#666; padding:8px 0;">
             📝 補足情報を追加（任意・クリックで展開）
           </summary>
-          <div style="margin-top:12px; padding:16px;">
+          <div style="margin-top:12px;">
             <p class="p text-sm text-muted" style="margin-bottom:12px;">メール本文だけで情報が不足している場合に入力してください</p>
             
             <div class="hint-row" style="margin-bottom:10px;">
@@ -412,18 +412,14 @@ export function renderRegisterTab(app) {
       <!-- プレビュー/編集エリア -->
       <div id="reg_preview" class="is-hidden" style="margin-bottom:20px;"></div>
 
-      <!-- JSON詳細（上級者向け） -->
-      <details style="margin-bottom:20px;">
-        <summary style="cursor:pointer; font-weight:600; color:#666; padding:12px 16px;">
-          ⚙️ 詳細設定（上級者向け・JSON編集）
-        </summary>
-        <div style="margin-top:12px; padding:16px;">
-          <p class="p text-sm text-muted" style="margin-bottom:8px;">
-            生成されたJSONを直接編集できます（通常は不要）
-          </p>
-          <textarea id="reg_draft" class="textarea mono" rows="12" placeholder="解釈結果のJSONがここに表示されます" style="font-size:12px;"></textarea>
+      <!-- 詳細設定（上級者向け） -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="row row-between" style="margin-bottom:12px;">
+          <p class="p"><b>詳細設定（上級者向け）</b>：JSONを直接編集できます</p>
+          <button id="reg_toggle_json" class="btn btn-sm" type="button">JSONを表示</button>
         </div>
-      </details>
+        <textarea id="reg_draft" class="textarea mono is-hidden" rows="12" placeholder="解釈結果がここに入ります（上級者向け）。" style="font-size:12px;"></textarea>
+      </div>
 
       <!-- 実行結果 -->
       <div id="reg_result" class="p"></div>
@@ -762,44 +758,47 @@ export function renderRegisterTab(app) {
       }).join("");
 
       return `
-        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:16px; margin-bottom:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #eee;">
-            <div style="flex:1;">
-              <div style="font-size:16px; font-weight:600; color:#333; margin-bottom:6px;">
-                📅 #${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}
+        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:12px; margin-bottom:12px; border:1px solid #ddd; border-radius:8px; background:#fff;">
+          <!-- ヘッダー部分：スマホで縦並び -->
+          <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #eee;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+              <div style="font-size:15px; font-weight:600; color:#333; flex:1; min-width:0;">
+                <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  📅 #${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}
+                </div>
               </div>
-              ${warnBadges ? `<div style="margin-top:6px;">${warnBadges}</div>` : ""}
+              <div style="display:flex; gap:6px; flex-shrink:0;">
+                <button class="btn btn-sm" type="button" data-action="dup" ${locked ? "disabled" : ""} title="複製" style="padding:4px 8px; min-width:auto;">📋</button>
+                <button class="btn btn-sm" type="button" data-action="del" ${locked ? "disabled" : ""} title="削除" style="padding:4px 8px; min-width:auto; color:#d32f2f;">🗑️</button>
+              </div>
             </div>
-            <div style="display:flex; gap:8px;">
-              <button class="btn btn-sm" type="button" data-action="dup" ${locked ? "disabled" : ""} title="この予約を複製">📋 複製</button>
-              <button class="btn btn-sm" type="button" data-action="del" ${locked ? "disabled" : ""} title="この予約を削除" style="color:#d32f2f;">🗑️ 削除</button>
-            </div>
+            ${warnBadges ? `<div style="margin-top:6px;">${warnBadges}</div>` : ""}
           </div>
 
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:12px;">
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px; margin-bottom:10px;">
             <div>
-              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">⏰ 開始時刻</label>
-              <input class="input mono" data-field="start_time" value="${escapeHtml(st || "09:00")}" ${locked ? "disabled" : ""} style="font-size:14px;" />
+              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">⏰ 開始</label>
+              <input type="time" class="input mono" data-field="start_time" value="${escapeHtml(st || "09:00")}" ${locked ? "disabled" : ""} style="font-size:14px;" />
             </div>
             <div>
-              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">⏱️ 終了時刻</label>
-              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="font-size:14px;" />
+              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">⏱️ 終了</label>
+              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="background:#f5f5f5; font-size:14px;" />
             </div>
             <div>
-              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">📦 コース</label>
-              <select class="input" data-field="course" ${locked ? "disabled" : ""}>
+              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">📦 コース</label>
+              <select class="input" data-field="course" ${locked ? "disabled" : ""} style="font-size:14px;">
                 ${courseSelectHtml_(course || "30min")}
               </select>
             </div>
             <div>
-              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">🏷️ タイプ</label>
-              <select class="input" data-field="visit_type" ${locked ? "disabled" : ""}>${typeOptions}</select>
+              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">🏷️ タイプ</label>
+              <select class="input" data-field="visit_type" ${locked ? "disabled" : ""} style="font-size:14px;">${typeOptions}</select>
             </div>
           </div>
 
           <div>
-            <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">📝 メモ</label>
-            <textarea class="textarea" rows="2" data-field="memo" ${locked ? "disabled" : ""} placeholder="この訪問に関するメモ（任意）">${escapeHtml(memo)}</textarea>
+            <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">📝 メモ</label>
+            <textarea class="textarea" rows="2" data-field="memo" ${locked ? "disabled" : ""} placeholder="この訪問に関するメモ（任意）" style="font-size:14px;">${escapeHtml(memo)}</textarea>
           </div>
         </div>
       `;
@@ -911,6 +910,14 @@ export function renderRegisterTab(app) {
     refreshUI_();
     refreshFromDraftTextarea_();
   });
+
+  if (toggleJsonBtn) {
+    toggleJsonBtn.addEventListener("click", () => {
+      _jsonVisible = !_jsonVisible;
+      if (draftEl) draftEl.classList.toggle("is-hidden", !_jsonVisible);
+      toggleJsonBtn.textContent = _jsonVisible ? "JSONを隠す" : "JSONを表示";
+    });
+  }
 
   if (previewEl) {
     previewEl.addEventListener("click", (ev) => {
