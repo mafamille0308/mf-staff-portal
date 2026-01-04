@@ -760,9 +760,9 @@ export function renderRegisterTab(app) {
       return `
         <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:12px; margin-bottom:12px;">
           <!-- ヘッダー部分：スマホで縦並び -->
-          <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px">
+          <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #eee;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
-              <div style="font-size:15px; font-weight:600; color:#333; flex:1; min-width:0;">
+              <div style="font-size:15px; font-weight:600; flex:1; min-width:0;">
                 <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                   📅 #${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}
                 </div>
