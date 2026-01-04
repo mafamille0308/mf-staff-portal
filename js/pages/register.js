@@ -49,41 +49,47 @@ function fmtHm_(t) {
 
 /**
  * コース選択肢（UI用）
- * - CONFIG.COURSE_MINUTES があればそれを使って minutes 昇順に整列
+ * - GAS側 CONFIG.COURSE_MINUTES があればそれを使って minutes 昇順に整列
  * - ない場合は最低限の固定候補を用意（30/60/90）
  * - 返すのは [{ key, minutes }] の配列
  */
-function getCourseOptions_() {
-  try {
-    const map = CONFIG && CONFIG.COURSE_MINUTES ? CONFIG.COURSE_MINUTES : null;
-    if (map && typeof map === "object") {
-      const list = Object.keys(map).map((k) => {
-        const n = Number(map[k]);
-        return { key: String(k), minutes: Number.isFinite(n) ? n : 0 };
-      });
-      // minutes 昇順 → key 昇順
-      return list
-        .filter((x) => x.key)
-        .sort((a, b) => (a.minutes - b.minutes) || a.key.localeCompare(b.key));
-    }
-  } catch (e) {}
+let _courseOptionsCache = null; // [{ course, minutes }]
+
+function fallbackCourseOptions_() {
   return [
-    { key: "30min", minutes: 30 },
-    { key: "60min", minutes: 60 },
-    { key: "90min", minutes: 90 },
+    { course: "30min", minutes: 30 },
+    { course: "60min", minutes: 60 },
+    { course: "90min", minutes: 90 },
   ];
+}
+
+async function ensureCourseOptions_() {
+  if (_courseOptionsCache && _courseOptionsCache.length) return _courseOptionsCache;
+  try {
+    const idToken = getIdToken();
+    if (!idToken) throw new Error("未ログインです。ログインし直してください。");
+    const resp = await callGas({ action: "getCourseOptions" }, idToken);
+    const u = unwrapResults(resp);
+    const results = (u && Array.isArray(u.results)) ? u.results : [];
+    const list = results
+      .map((x) => ({ course: String(x.course || "").trim(), minutes: Number(x.minutes) || 0 }))
+      .filter((x) => !!x.course);
+    _courseOptionsCache = list.length ? list : fallbackCourseOptions_();
+  } catch (e) {
+    // 取得失敗時もUIは動かす（登録導線停止を避ける）
+    _courseOptionsCache = fallbackCourseOptions_();
+  }
+  return _courseOptionsCache;
 }
 
 function courseSelectHtml_(currentCourse) {
   const cur = String(currentCourse || "").trim() || "30min";
-  const opts = getCourseOptions_();
-  // 現在値が候補にない場合（将来のキー移行/互換）に備えて先頭に追加
-  const has = opts.some((o) => String(o.key) === cur);
-  const all = has ? opts : [{ key: cur, minutes: 0 }, ...opts];
+  const opts = (_courseOptionsCache && _courseOptionsCache.length) ? _courseOptionsCache : fallbackCourseOptions_();
+  const has = opts.some((o) => String(o.course) === cur);
+  const all = has ? opts : [{ course: cur, minutes: 0 }, ...opts]; // 互換用
   return all.map((o) => {
-    const k = String(o.key);
+    const k = String(o.course);
     const sel = (k === cur) ? "selected" : "";
-    // 表示は当面 key をそのまま（SaaS化で labels を導入する余地あり）
     return `<option value="${escapeHtml(k)}" ${sel}>${escapeHtml(k)}</option>`;
   }).join("");
 }
@@ -426,6 +432,8 @@ export function renderRegisterTab(app) {
   let _customerLookupTimer = null;
   let _lastCommitHash = "";
   let _lastCommitRequestId = "";
+
+  ensureCourseOptions_().then(() => { try { refreshUI_(); } catch (e) {} });
 
   updateAssignUi_();
   window.addEventListener("mf:auth:changed", updateAssignUi_);
