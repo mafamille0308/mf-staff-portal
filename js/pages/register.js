@@ -273,12 +273,21 @@ export function renderRegisterTab(app) {
         <button id="reg_commit" class="btn btn-primary" disabled>登録実行（commit）</button>
       </div>
 
-      <p class="p text-muted">解釈結果は draft JSON とプレビューで確認できます。</p>
-      <textarea id="reg_draft" class="textarea mono" rows="12" placeholder="解釈結果がここに入ります。不要なら手で修正できます。"></textarea>
+      <p class="p text-muted">手順：1) 解釈 → 2) 顧客確定 → 3) 候補を必要に応じて修正 → 4) 登録実行</p>
+
+      <div id="reg_customer_selected" class="is-hidden"></div>
+      <div id="reg_customer_candidates" class="is-hidden"></div>
 
       <div id="reg_warnings" class="is-hidden"></div>
       <div id="reg_preview" class="is-hidden"></div>
-      <div id="reg_customer_candidates" class="is-hidden"></div>
+
+      <div class="card" style="margin-top:12px;">
+        <div class="row row-between">
+          <p class="p"><b>詳細（上級者向け）</b>：JSON を直接編集できます</p>
+          <button id="reg_toggle_json" class="btn btn-sm" type="button">JSONを表示</button>
+        </div>
+        <textarea id="reg_draft" class="textarea mono is-hidden" rows="12" placeholder="解釈結果がここに入ります（上級者向け）。"></textarea>
+      </div>
 
       <div id="reg_result" class="p"></div>
     </section>
@@ -309,15 +318,20 @@ export function renderRegisterTab(app) {
   const warningsEl = qs("#reg_warnings");
   const previewEl = qs("#reg_preview");
   const customerCandidatesEl = qs("#reg_customer_candidates");
+  const customerSelectedEl = qs("#reg_customer_selected");
+  const toggleJsonBtn = qs("#reg_toggle_json");
   const overlayEl = qs("#reg_overlay");
   const overlayTextEl = qs("#reg_overlay_text");
 
   let _busy = false;
+  let _draftObj = null; // { visits:[], warnings:[] }
+  let _selectedCustomer = null; // { customer_id, name, kana?, memo? }
+  let _hardErrors = [];
+  let _jsonVisible = false;
+  let _lastCommitSucceeded = false;
   let _customerLookupTimer = null;
-
   let _lastCommitHash = "";
   let _lastCommitRequestId = "";
-  let _lastCommitSucceeded = false;
 
   updateAssignUi_();
   window.addEventListener("mf:auth:changed", updateAssignUi_);
@@ -465,16 +479,22 @@ export function renderRegisterTab(app) {
       const kana = r.kana || r.name_kana || "";
       const id = r.id || r.customer_id || "";
       const memo = r.memo || "";
-      return `
-        <div class="candidate-row">
-          <div class="candidate-title">#${idx + 1} ${escapeHtml(name || "(名称不明)")}</div>
-          <div class="candidate-meta text-muted text-sm">
-            ${id ? `ID: ${escapeHtml(id)} ` : ""}
-            ${kana ? ` / ${escapeHtml(kana)}` : ""}
-          </div>
-          ${memo ? `<div class="candidate-memo text-sm">${escapeHtml(memo)}</div>` : ""}
-        </div>
-      `;
+        const picked = (_selectedCustomer && _selectedCustomer.customer_id && String(_selectedCustomer.customer_id) === String(id)) ? "checked" : "";
+        return `
+          <label class="candidate-row candidate-pick">
+            <div class="row" style="align-items:flex-start; gap:10px;">
+              <input type="radio" name="reg_customer_pick" value="${escapeHtml(id)}" data-idx="${idx}" ${picked} />
+              <div style="flex:1;">
+                <div class="candidate-title">#${idx + 1} ${escapeHtml(name || "(名称不明)")}</div>
+                <div class="candidate-meta text-muted text-sm">
+                  ${id ? `ID: ${escapeHtml(id)} ` : ""}
+                  ${kana ? ` / ${escapeHtml(kana)}` : ""}
+                </div>
+                ${memo ? `<div class="candidate-memo text-sm">${escapeHtml(memo)}</div>` : ""}
+              </div>
+            </div>
+          </label>
+        `;
     }).join("");
 
     customerCandidatesEl.innerHTML = `
@@ -485,6 +505,192 @@ export function renderRegisterTab(app) {
       </div>
     `;
     customerCandidatesEl.classList.remove("is-hidden");
+
+    const radios = customerCandidatesEl.querySelectorAll('input[name="reg_customer_pick"]');
+    radios.forEach((el) => {
+      el.addEventListener("change", () => {
+        try {
+          const i = Number(el.getAttribute("data-idx") || "0");
+          const picked = results[i];
+          applyCustomerToDraft_(picked);
+          renderCustomerCandidates_({ ...state });
+          refreshUI_();
+        } catch (e) {
+          toast({ message: (e && e.message) ? e.message : String(e) });
+        }
+      });
+    });
+
+    if (results.length === 1 && !_selectedCustomer) {
+     applyCustomerToDraft_(results[0]);
+     refreshUI_();
+     renderCustomerCandidates_({ ...state });
+    }
+  }
+
+  function renderCustomerSelected_() {
+    if (!customerSelectedEl) return;
+    if (!_selectedCustomer) {
+      customerSelectedEl.classList.add("is-hidden");
+      customerSelectedEl.innerHTML = "";
+      return;
+    }
+    const name = _selectedCustomer.name || "";
+    const id = _selectedCustomer.customer_id || "";
+    customerSelectedEl.innerHTML = `
+      <div class="card">
+        <p class="p"><b>顧客確定</b>：${escapeHtml(name)} ${id ? `<span class="badge">ID:${escapeHtml(id)}</span>` : ""}</p>
+        <p class="p text-sm text-muted">顧客を変更する場合は「解釈」からやり直してください（誤登録防止のため）。</p>
+      </div>
+    `;
+    customerSelectedEl.classList.remove("is-hidden");
+  }
+
+  function applyCustomerToDraft_(customer) {
+    if (!customer || !_draftObj) return;
+    const id = String(customer.customer_id || customer.id || "").trim();
+    if (!id) return;
+
+    _selectedCustomer = {
+      customer_id: id,
+      name: String(customer.name || customer.customer_name || "").trim() || String(customer.display_name || "").trim(),
+      kana: String(customer.kana || "").trim(),
+      memo: String(customer.memo || "").trim(),
+    };
+
+    const visits = Array.isArray(_draftObj.visits) ? _draftObj.visits : [];
+    visits.forEach(v => { v.customer_id = id; });
+  }
+
+  function computeHardErrors_(draft) {
+    const errors = [];
+    const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
+    const seen = new Map(); // key -> [idx]
+    visits.forEach((v, idx) => {
+      const date = String(v.date || "").trim();
+      const st = String(v.start_time || "").trim();
+      if (!date || !st) return;
+      const key = `${date}__${st}`;
+      const arr = seen.get(key) || [];
+      arr.push(idx);
+      seen.set(key, arr);
+    });
+    for (const [key, idxs] of seen.entries()) {
+      if (idxs.length <= 1) continue;
+      const [date, st] = key.split("__");
+      errors.push({ code: "DUPLICATE_START_TIME", message: `同一日付・同一開始時刻が重複しています：${date} ${st}`, idxs });
+    }
+    return errors;
+  }
+  function fmtWarnBadge_(label) {
+    return `<span class="badge badge-warn">⚠ ${escapeHtml(label)}</span>`;
+  }
+  function renderEditor_(draft) {
+    if (!previewEl) return;
+    const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
+    if (!visits.length) {
+      previewEl.classList.add("is-hidden");
+      previewEl.innerHTML = "";
+      return;
+    }
+
+    const locked = !_selectedCustomer;
+
+    const cards = visits.map((v, idx) => {
+      const rowNum = v.row_num != null ? String(v.row_num) : String(idx + 1);
+      const date = String(v.date || "").trim();
+      const st = String(v.start_time || "").trim();
+      const et = String(v.end_time || "").trim();
+      const course = String(v.course || "").trim();
+      const vt = String(v.visit_type || "sitting").trim();
+      const memo = String(v.memo || "");
+      const timeHint = String(v.time_hint || "unspecified").trim();
+
+      const warnBadges = [
+        (timeHint === "unspecified") ? fmtWarnBadge_("時間は仮設定（必要に応じてカレンダーで調整）") : "",
+        (!course) ? fmtWarnBadge_("コースは仮設定（30min）") : "",
+      ].filter(Boolean).join(" ");
+
+      const typeOptions = Object.keys(VISIT_TYPE_LABELS).map(k => {
+        const sel = (k === vt) ? "selected" : "";
+        return `<option value="${escapeHtml(k)}" ${sel}>${escapeHtml(VISIT_TYPE_LABELS[k])}</option>`;
+      }).join("");
+
+      return `
+        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}">
+          <div class="preview-row-top">
+            <div>
+              <div class="preview-title">#${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}</div>
+              <div class="preview-meta">
+                ${warnBadges || ""}
+              </div>
+            </div>
+            <div class="row" style="gap:8px;">
+              <button class="btn btn-sm" type="button" data-action="dup" ${locked ? "disabled" : ""}>複製</button>
+              <button class="btn btn-sm" type="button" data-action="del" ${locked ? "disabled" : ""}>削除</button>
+            </div>
+          </div>
+
+          <div class="edit-grid">
+            <div>
+              <div class="label-sm">開始</div>
+              <input class="input mono" data-field="start_time" value="${escapeHtml(st || "09:00")}" ${locked ? "disabled" : ""} />
+            </div>
+            <div>
+              <div class="label-sm">終了</div>
+              <input class="input mono" data-field="end_time" value="${escapeHtml(et)}" placeholder="任意" ${locked ? "disabled" : ""} />
+            </div>
+            <div>
+              <div class="label-sm">コース</div>
+              <input class="input" data-field="course" value="${escapeHtml(course || "30min")}" ${locked ? "disabled" : ""} />
+            </div>
+            <div>
+              <div class="label-sm">タイプ</div>
+              <select class="input" data-field="visit_type" ${locked ? "disabled" : ""}>${typeOptions}</select>
+            </div>
+          </div>
+
+          <div style="margin-top:8px;">
+            <div class="label-sm">メモ</div>
+            <textarea class="textarea" rows="2" data-field="memo" ${locked ? "disabled" : ""}>${escapeHtml(memo)}</textarea>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    previewEl.innerHTML = `
+      <div class="card">
+        <p class="p"><b>登録候補（修正可）</b></p>
+        ${locked ? `<p class="p text-sm text-muted">先に顧客を確定してください（顧客未確定の間は編集できません）。</p>` : `<p class="p text-sm text-muted">必要に応じて修正してください（時間/コースの仮設定は黄色表示です）。</p>`}
+        <div class="preview-wrap">${cards}</div>
+      </div>
+    `;
+    previewEl.classList.remove("is-hidden");
+  }
+
+  function syncDraftTextarea_() {
+    if (!draftEl) return;
+    if (!_draftObj) { draftEl.value = ""; return; }
+    draftEl.value = prettyJson_(_draftObj);
+    // draftEl には draftそのものを入れる（現行互換）
+  }
+
+  function refreshUI_() {
+    renderCustomerSelected_();
+    _hardErrors = computeHardErrors_(_draftObj);
+
+    const warnings = (_draftObj && Array.isArray(_draftObj.warnings)) ? _draftObj.warnings : [];
+    const hardAsWarnings = _hardErrors.map(e => ({ code: e.code, message: e.message, row_nums: [] }));
+    renderWarnings_([ ...warnings, ...hardAsWarnings ]);
+
+    renderEditor_(_draftObj);
+
+    const hasDraft = !!(_draftObj && Array.isArray(_draftObj.visits) && _draftObj.visits.length);
+    const hasCustomer = !!_selectedCustomer;
+    const hasHardError = !!(_hardErrors && _hardErrors.length);
+    commitBtn.disabled = _busy || !hasDraft || !hasCustomer || hasHardError;
+
+    syncDraftTextarea_();
   }
 
   function buildHintText_() {
@@ -517,22 +723,100 @@ export function renderRegisterTab(app) {
   }
 
   function refreshFromDraftTextarea_() {
-    const { draft, error } = parseDraftFromTextarea_();
-    if (error) {
-      renderPreview_(null);
+    if (!draftEl) return;
+    const raw = String(draftEl.value || "").trim();
+    if (!raw) {
+      _draftObj = null;
+      _selectedCustomer = null;
       renderWarnings_([]);
       renderCustomerCandidates_(null);
+      renderCustomerSelected_();
+      renderEditor_(null);
+      commitBtn.disabled = true;
       return;
     }
-    renderWarnings_(draft?.warnings || []);
-    renderPreview_(draft);
-    scheduleCustomerLookup_(draft);
+    try {
+      const parsed = JSON.parse(raw);
+      const draft = parsed && parsed.draft ? parsed.draft : parsed;
+      _draftObj = draft;
+      const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
+      const cid = String((visits[0] && visits[0].customer_id) || "").trim();
+      if (!cid) _selectedCustomer = null;
+      refreshUI_();
+      scheduleCustomerLookup_(draft);
+    } catch (e) {
+      commitBtn.disabled = true;
+    }
   }
 
   draftEl.addEventListener("input", () => {
-    commitBtn.disabled = _busy || !draftEl.value.trim();
+    refreshUI_();
     refreshFromDraftTextarea_();
   });
+
+  if (toggleJsonBtn) {
+    toggleJsonBtn.addEventListener("click", () => {
+      _jsonVisible = !_jsonVisible;
+      if (draftEl) draftEl.classList.toggle("is-hidden", !_jsonVisible);
+      toggleJsonBtn.textContent = _jsonVisible ? "JSONを隠す" : "JSONを表示";
+    });
+  }
+
+  if (previewEl) {
+    previewEl.addEventListener("click", (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest("button[data-action]") : null;
+      if (!btn) return;
+      if (!_draftObj || !_selectedCustomer) return;
+      const wrap = btn.closest("[data-idx]");
+      const idx = wrap ? Number(wrap.getAttribute("data-idx") || "0") : -1;
+      if (idx < 0) return;
+
+      const action = btn.getAttribute("data-action");
+      const visits = Array.isArray(_draftObj.visits) ? _draftObj.visits : [];
+
+      if (action === "del") {
+        visits.splice(idx, 1);
+        refreshUI_();
+        return;
+      }
+      if (action === "dup") {
+        const src = visits[idx];
+        if (!src) return;
+        const maxRow = visits.reduce((m, v) => Math.max(m, Number(v.row_num || 0)), 0);
+        const copy = { ...src, row_num: maxRow + 1 };
+        visits.splice(idx + 1, 0, copy);
+        refreshUI_();
+        return;
+      }
+    });
+
+    previewEl.addEventListener("input", (ev) => {
+      const el = ev.target;
+      if (!el || !_draftObj || !_selectedCustomer) return;
+      const field = el.getAttribute("data-field");
+      if (!field) return;
+      const wrap = el.closest("[data-idx]");
+      const idx = wrap ? Number(wrap.getAttribute("data-idx") || "0") : -1;
+      if (idx < 0) return;
+      const visits = Array.isArray(_draftObj.visits) ? _draftObj.visits : [];
+      const v = visits[idx];
+      if (!v) return;
+
+      if (field === "start_time") {
+        v.start_time = String(el.value || "").trim();
+        v.time_hint = "fixed";
+      } else if (field === "end_time") {
+        v.end_time = String(el.value || "").trim();
+      } else if (field === "course") {
+        v.course = String(el.value || "").trim();
+      } else if (field === "visit_type") {
+        v.visit_type = String(el.value || "").trim();
+      } else if (field === "memo") {
+        v.memo = String(el.value || "");
+      }
+      refreshUI_();
+    });
+  }
 
   function scheduleCustomerLookup_(draft) {
     if (_customerLookupTimer) window.clearTimeout(_customerLookupTimer);
@@ -610,14 +894,14 @@ export function renderRegisterTab(app) {
       const data = await callInterpreter_(token, mergedText, adminAssignStaffName);
       console.log("[register] step4: callInterpreter_ ok=", !!(data && data.ok));
 
-      draftEl.value = prettyJson_(data.draft);
-
-      const warnings = (data.draft && data.draft.warnings) || [];
-      renderWarnings_(warnings);
-      renderPreview_(data.draft);
-      scheduleCustomerLookup_(data.draft);
-      resultEl.innerHTML = `<div class="card"><p class="p">draftを生成しました。不要なら修正してから「登録実行」を押してください。</p></div>`;
-      commitBtn.disabled = false;
+      _draftObj = data.draft;
+      _selectedCustomer = null;
+      _jsonVisible = false;
+      if (draftEl) draftEl.classList.add("is-hidden");
+      if (toggleJsonBtn) toggleJsonBtn.textContent = "JSONを表示";
+      refreshUI_();
+      scheduleCustomerLookup_(_draftObj);
+      resultEl.innerHTML = `<div class="card"><p class="p">draftを生成しました。次に「顧客確定」を行い、必要に応じて候補を修正してから「登録実行」を押してください。</p></div>`;
     } catch (e) {
       toast({ message: (e && e.message) ? e.message : String(e) });
     } finally {
@@ -626,6 +910,7 @@ export function renderRegisterTab(app) {
   });
 
   commitBtn.addEventListener("click", async () => {
+    if (!_selectedCustomer) return toast({ message: "先に顧客を確定してください" });
     if (_busy) return;
     const raw = String(draftEl.value || "").trim();
     if (!raw) return;
