@@ -48,6 +48,47 @@ function fmtHm_(t) {
 }
 
 /**
+ * コース選択肢（UI用）
+ * - CONFIG.COURSE_MINUTES があればそれを使って minutes 昇順に整列
+ * - ない場合は最低限の固定候補を用意（30/60/90）
+ * - 返すのは [{ key, minutes }] の配列
+ */
+function getCourseOptions_() {
+  try {
+    const map = CONFIG && CONFIG.COURSE_MINUTES ? CONFIG.COURSE_MINUTES : null;
+    if (map && typeof map === "object") {
+      const list = Object.keys(map).map((k) => {
+        const n = Number(map[k]);
+        return { key: String(k), minutes: Number.isFinite(n) ? n : 0 };
+      });
+      // minutes 昇順 → key 昇順
+      return list
+        .filter((x) => x.key)
+        .sort((a, b) => (a.minutes - b.minutes) || a.key.localeCompare(b.key));
+    }
+  } catch (e) {}
+  return [
+    { key: "30min", minutes: 30 },
+    { key: "60min", minutes: 60 },
+    { key: "90min", minutes: 90 },
+  ];
+}
+
+function courseSelectHtml_(currentCourse) {
+  const cur = String(currentCourse || "").trim() || "30min";
+  const opts = getCourseOptions_();
+  // 現在値が候補にない場合（将来のキー移行/互換）に備えて先頭に追加
+  const has = opts.some((o) => String(o.key) === cur);
+  const all = has ? opts : [{ key: cur, minutes: 0 }, ...opts];
+  return all.map((o) => {
+    const k = String(o.key);
+    const sel = (k === cur) ? "selected" : "";
+    // 表示は当面 key をそのまま（SaaS化で labels を導入する余地あり）
+    return `<option value="${escapeHtml(k)}" ${sel}>${escapeHtml(k)}</option>`;
+  }).join("");
+}
+
+/**
  * course から minutes を推定（UI表示用）
  * - "30min" / "60min" / "90min" のような形式は数値抽出
  * - "30" のような数値文字列も許可
@@ -698,8 +739,9 @@ export function renderRegisterTab(app) {
             </div>
             <div>
               <div class="label-sm">コース</div>
-              <input class="input" data-field="course" value="${escapeHtml(course || "30min")}" ${locked ? "disabled" : ""} />
-            </div>
+              <select class="input" data-field="course" ${locked ? "disabled" : ""}>
+                ${courseSelectHtml_(course || "30min")}
+              </select>            </div>
             <div>
               <div class="label-sm">タイプ</div>
               <select class="input" data-field="visit_type" ${locked ? "disabled" : ""}>${typeOptions}</select>
