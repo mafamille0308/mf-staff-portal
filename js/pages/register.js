@@ -47,6 +47,59 @@ function fmtHm_(t) {
   return `${pad2_(d.getHours())}:${pad2_(d.getMinutes())}`;
 }
 
+/**
+ * course から minutes を推定（UI表示用）
+ * - "30min" / "60min" / "90min" のような形式は数値抽出
+ * - "30" のような数値文字列も許可
+ * - CONFIG.COURSE_MINUTES があればそれを優先
+ * - それ以外は 30 にフォールバック
+ *
+ * ※SaaS化で course が汎用キーになっても、CONFIG.COURSE_MINUTES 経由で表示可能。
+ */
+function minutesFromCourse_(course) {
+  const c = String(course || "").trim();
+  // CONFIG 側の定義があれば最優先
+  try {
+    const map = CONFIG && CONFIG.COURSE_MINUTES ? CONFIG.COURSE_MINUTES : null;
+    if (map && c && map[c] != null) {
+      const n = Number(map[c]);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  } catch (e) {}
+
+  if (!c) return 30;
+  // "30min" / "30 min" / "30mins" のような表現
+  const m1 = c.match(/^(\d+)\s*min/i);
+  if (m1) {
+    const n = Number(m1[1]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  // "30" のような数値
+  const m2 = c.match(/^(\d+)$/);
+  if (m2) {
+    const n = Number(m2[1]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 30;
+}
+
+/**
+ * "HH:mm" の start_time と course から end_time(HH:mm) を算出（UI表示用）
+ * - 変換できない場合は空文字
+ * - slot_minutes 等の丸めは UIではやらない（GASが最終確定）
+ */
+function calcEndHmFromStartAndCourse_(startTime, course) {
+  const st = fmtHm_(startTime);
+  if (!st) return "";
+  const [h, m] = st.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "";
+  const mins = minutesFromCourse_(course);
+  const total = h * 60 + m + mins;
+  const eh = Math.floor((total % (24 * 60)) / 60);
+  const em = total % 60;
+  return `${pad2_(eh)}:${pad2_(em)}`;
+}
+
 async function fetchInterpreterToken_() {
   const idToken = getIdToken();
   console.log("[register] has id_token =", !!idToken, "len=", idToken ? idToken.length : 0);
@@ -360,7 +413,9 @@ export function renderRegisterTab(app) {
     _busy = b;
     interpretBtn.disabled = b;
     if (commitBtn) {
-      commitBtn.disabled = b || !draftEl.value.trim();
+      // commit の有効/無効は refreshUI_() が責務を持つ（顧客確定/重複エラー等）
+      // busy の間だけ強制的に無効化し、解除後は refreshUI_() に戻す
+      if (b) commitBtn.disabled = true;
     }
     if (overlayEl) {
       overlayEl.classList.toggle("is-hidden", !b);
@@ -371,6 +426,7 @@ export function renderRegisterTab(app) {
     } else if (overlayTextEl && !overlayText) {
       overlayTextEl.textContent = "処理中...";
     }
+    if (!b) { try { refreshUI_(); } catch (e) {} }
   }
 
   function renderWarnings_(warnings = []) {
@@ -600,11 +656,11 @@ export function renderRegisterTab(app) {
       const rowNum = v.row_num != null ? String(v.row_num) : String(idx + 1);
       const date = String(v.date || "").trim();
       const st = String(v.start_time || "").trim();
-      const et = String(v.end_time || "").trim();
       const course = String(v.course || "").trim();
       const vt = String(v.visit_type || "sitting").trim();
       const memo = String(v.memo || "");
       const timeHint = String(v.time_hint || "unspecified").trim();
+      const endHm = calcEndHmFromStartAndCourse_(st || "09:00", course || "30min");
 
       const warnBadges = [
         (timeHint === "unspecified") ? fmtWarnBadge_("時間は仮設定（必要に応じてカレンダーで調整）") : "",
@@ -638,7 +694,7 @@ export function renderRegisterTab(app) {
             </div>
             <div>
               <div class="label-sm">終了</div>
-              <input class="input mono" data-field="end_time" value="${escapeHtml(et)}" placeholder="任意" ${locked ? "disabled" : ""} />
+              <input class="input mono" value="${escapeHtml(endHm)}" disabled />
             </div>
             <div>
               <div class="label-sm">コース</div>
@@ -805,8 +861,6 @@ export function renderRegisterTab(app) {
       if (field === "start_time") {
         v.start_time = String(el.value || "").trim();
         v.time_hint = "fixed";
-      } else if (field === "end_time") {
-        v.end_time = String(el.value || "").trim();
       } else if (field === "course") {
         v.course = String(el.value || "").trim();
       } else if (field === "visit_type") {
@@ -814,6 +868,8 @@ export function renderRegisterTab(app) {
       } else if (field === "memo") {
         v.memo = String(el.value || "");
       }
+      // end_time は UI編集不可・payload送信不可：万一残っていてもここで破棄
+      try { delete v.end_time; } catch (e) {}
       refreshUI_();
     });
   }
@@ -925,9 +981,18 @@ export function renderRegisterTab(app) {
     const visits = Array.isArray(draft.visits) ? draft.visits : [];
     if (!visits.length) return toast({ message: "登録候補が0件です" });
 
+    // commit payload：end_time は送らない（GASで start_time + course から再計算）
+    const visitsForCommit = visits.map((v) => {
+      const nv = { ...v };
+      // UIでは end_time を扱わない。存在しても送らない。
+      try { delete nv.end_time; } catch (e) {}
+      // ついでに "表示専用" の可能性があるフィールドも将来整理しやすいようにここで固定
+      return nv;
+    });
+
     // 二重送信防止：同一payloadの連続commitをブロック
     // ※ draftが手修正されればハッシュが変わるので再送可能
-    const contentHash = await sha256Hex_(JSON.stringify({ visits }));
+    const contentHash = await sha256Hex_(JSON.stringify({ visits: visitsForCommit }));
     if (_lastCommitSucceeded && _lastCommitHash && _lastCommitHash === contentHash) {
       return toast({ message: "同じ内容の登録はすでに実行済みです（二重送信防止）" });
     }
@@ -958,7 +1023,7 @@ export function renderRegisterTab(app) {
         action: "bulkRegisterVisits",
         request_id: _lastCommitRequestId,
         content_hash: _lastCommitHash,
-        visits: visits,
+        visits: visitsForCommit,
         source: "portal_register",
       }, idToken);
 
