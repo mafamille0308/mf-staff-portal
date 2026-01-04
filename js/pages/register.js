@@ -315,83 +315,121 @@ function fmtVisitType_(type) {
 export function renderRegisterTab(app) {
   render(app, `
     <section class="section">
-      <h1 class="h1">予約登録（draft → commit）</h1>
+      <h1 class="h1">予約登録</h1>
+      <p class="p text-muted" style="margin-top:-8px; margin-bottom:24px;">メール本文から予約候補を自動生成し、確認後に一括登録できます</p>
 
-      <label class="label">メール本文</label>
-      <textarea id="reg_email" class="textarea" rows="10" placeholder="依頼文を貼りつけてください"></textarea>
-
-      <div class="card" style="margin-top:12px;">
-        <p class="p"><b>補足（任意）</b>：空欄は送信しません。</p>
-        <div class="hint-row">
-          <div class="hint-label">顧客名：</div>
-          <input id="reg_hint_customer" class="input" placeholder="例：佐藤 花子" />
+      <!-- ステップ1: メール入力 -->
+      <div class="card" style="margin-bottom:20px;">
+        <div style="margin-bottom:16px;">
+          <label class="label" style="margin-bottom:8px; display:block; font-weight:600;">ステップ1: メール本文を貼り付け</label>
+          <textarea id="reg_email" class="textarea" rows="8" placeholder="顧客からの依頼メールを貼り付けてください&#x0a;例: 1月10日から12日まで、朝夕2回ずつシッティングをお願いします。"></textarea>
         </div>
-        <div class="hint-row">
-          <div class="hint-label">顧客特定ヒント：</div>
-          <input id="reg_hint_customer_info" class="input" placeholder="例：青葉区○○ / ぽち / マンション名 / 電話末尾1234 など" />
-        </div>
-        <div class="hint-row">
-          <div class="hint-label">訪問期間：</div>
-          <input id="reg_hint_date" class="input" placeholder="例：2026-01-01 - 2026-01-05（または 1/1 - 1/5）" />
-        </div>
-        <div class="hint-row">
-          <div class="hint-label">訪問回数：</div>
-          <input id="reg_hint_count" class="input" placeholder="例：合計3回 / 1日2回" />
-        </div>
-        <div class="hint-row">
-          <div class="hint-label">訪問時間：</div>
-          <input id="reg_hint_time" class="input" placeholder="例：朝 / 夕方 / 14時 / 1/1は夜 など" />
-        </div>
-        <div class="hint-row">
-          <div class="hint-label">訪問タイプ：</div>
-          <input id="reg_hint_type" class="input" placeholder="例：シッティング / トレーニング / 打ち合わせ" />
-        </div>
-        <div class="hint-row">
-          <div class="hint-label">メモ：</div>
-          <textarea id="reg_hint_memo" class="textarea" rows="2" placeholder="例：鍵はポスト返却。給餌は1日2回。"></textarea>
-        </div>
-        <p class="p text-sm text-muted" style="margin-top:6px;">補足項目は入力がある場合のみ添付します。</p>
+        
+        <!-- 補足情報（折りたたみ可能に） -->
+        <details style="margin-top:16px;">
+          <summary style="cursor:pointer; font-weight:600; color:#666; padding:8px 0;">
+            📝 補足情報を追加（任意・クリックで展開）
+          </summary>
+          <div style="margin-top:12px; padding:16px;">
+            <p class="p text-sm text-muted" style="margin-bottom:12px;">メール本文だけで情報が不足している場合に入力してください</p>
+            
+            <div class="hint-row" style="margin-bottom:10px;">
+              <label class="hint-label" style="min-width:140px;">顧客名</label>
+              <input id="reg_hint_customer" class="input" placeholder="例: 佐藤 花子" />
+            </div>
+            <div class="hint-row" style="margin-bottom:10px;">
+              <label class="hint-label" style="min-width:140px;">顧客特定ヒント</label>
+              <input id="reg_hint_customer_info" class="input" placeholder="例: 青葉区○○ / ぽち / マンション名 / 電話末尾1234" />
+            </div>
+            <div class="hint-row" style="margin-bottom:10px;">
+              <label class="hint-label" style="min-width:140px;">訪問期間</label>
+              <input id="reg_hint_date" class="input" placeholder="例: 2026-01-01 - 2026-01-05 または 1/1 - 1/5" />
+            </div>
+            <div class="hint-row" style="margin-bottom:10px;">
+              <label class="hint-label" style="min-width:140px;">訪問回数</label>
+              <input id="reg_hint_count" class="input" placeholder="例: 合計3回 / 1日2回" />
+            </div>
+            <div class="hint-row" style="margin-bottom:10px;">
+              <label class="hint-label" style="min-width:140px;">訪問時間</label>
+              <input id="reg_hint_time" class="input" placeholder="例: 朝 / 夕方 / 14時 / 1/1は夜" />
+            </div>
+            <div class="hint-row" style="margin-bottom:10px;">
+              <label class="hint-label" style="min-width:140px;">訪問タイプ</label>
+              <input id="reg_hint_type" class="input" placeholder="例: シッティング / トレーニング / 打ち合わせ" />
+            </div>
+            <div style="margin-bottom:0;">
+              <label class="label" style="margin-bottom:4px;">メモ</label>
+              <textarea id="reg_hint_memo" class="textarea" rows="2" placeholder="例: 鍵はポスト返却。給餌は1日2回。"></textarea>
+            </div>
+          </div>
+        </details>
       </div>
 
-      <div id="reg_assign" class="card is-hidden" style="margin-top:12px;">
-        <p class="p"><b>登録先スタッフ（管理者のみ）</b></p>
-        <div class="hint-row">
-          <div class="hint-label">スタッフ名：</div>
-          <input id="reg_assign_staff_name" class="input" placeholder="未入力の場合は「顧客の主担当」に登録します" />
+      <!-- 登録先スタッフ（管理者のみ） -->
+      <div id="reg_assign" class="card is-hidden" style="margin-bottom:20px;">
+        <p class="p" style="margin-bottom:12px;"><b>登録先スタッフの指定（管理者のみ）</b></p>
+        <div class="hint-row" style="margin-bottom:8px;">
+          <label class="hint-label" style="min-width:140px;">スタッフ名</label>
+          <input id="reg_assign_staff_name" class="input" placeholder="未入力の場合は顧客の主担当に登録" />
         </div>
-        <p class="p text-sm text-muted" style="margin-top:6px;">
-          登録先は GAS 側で担当関係（CustomerStaffs）を確認します。担当関係がない場合は登録できません。
+        <p class="p text-sm text-muted" style="margin:0;">
+          ※ 担当関係（CustomerStaffs）がない場合は登録できません
         </p>
       </div>
 
-      <div id="reg_assign_summary" class="card" style="margin-top:12px;">
-        <p class="p"><b>登録先</b>：<span id="reg_assign_summary_text">（未ログイン）</span></p>
-      </div>
-
-      <div class="row">
-        <button id="reg_interpret" class="btn">解釈（draft生成）</button>
-        <button id="reg_commit" class="btn btn-primary" disabled>登録実行（commit）</button>
-      </div>
-
-      <p class="p text-muted">手順：1) 解釈 → 2) 顧客確定 → 3) 候補を必要に応じて修正 → 4) 登録実行</p>
-
-      <div id="reg_customer_selected" class="is-hidden"></div>
-      <div id="reg_customer_candidates" class="is-hidden"></div>
-
-      <div id="reg_warnings" class="is-hidden"></div>
-      <div id="reg_preview" class="is-hidden"></div>
-
-      <div class="card" style="margin-top:12px;">
-        <div class="row row-between">
-          <p class="p"><b>詳細（上級者向け）</b>：JSON を直接編集できます</p>
-          <button id="reg_toggle_json" class="btn btn-sm" type="button">JSONを表示</button>
+      <!-- 登録先サマリー -->
+      <div id="reg_assign_summary" class="card" style="margin-bottom:24px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:20px;">👤</span>
+          <div>
+            <p class="p text-sm text-muted" style="margin:0 0 2px 0;">登録先</p>
+            <p class="p" style="margin:0; font-weight:600;"><span id="reg_assign_summary_text">（未ログイン）</span></p>
+          </div>
         </div>
-        <textarea id="reg_draft" class="textarea mono is-hidden" rows="12" placeholder="解釈結果がここに入ります（上級者向け）。"></textarea>
       </div>
 
+      <!-- アクションボタン -->
+      <div class="row" style="gap:12px; margin-bottom:24px;">
+        <button id="reg_interpret" class="btn" style="flex:1; min-width:200px;">
+          🔍 ステップ2: 解釈（draft生成）
+        </button>
+        <button id="reg_commit" class="btn btn-primary" disabled style="flex:1; min-width:200px;">
+          ✅ ステップ4: 登録実行
+        </button>
+      </div>
+
+      <p class="p text-muted text-sm" style="margin-top:-16px; margin-bottom:32px; padding-left:4px;">
+        📋 手順: ① 解釈 → ② 顧客確定 → ③ 内容確認・修正 → ④ 登録実行
+      </p>
+
+      <!-- 顧客確定エリア -->
+      <div id="reg_customer_selected" class="is-hidden" style="margin-bottom:20px;"></div>
+      <div id="reg_customer_candidates" class="is-hidden" style="margin-bottom:20px;"></div>
+
+      <!-- 警告エリア -->
+      <div id="reg_warnings" class="is-hidden" style="margin-bottom:20px;"></div>
+
+      <!-- プレビュー/編集エリア -->
+      <div id="reg_preview" class="is-hidden" style="margin-bottom:20px;"></div>
+
+      <!-- JSON詳細（上級者向け） -->
+      <details style="margin-bottom:20px;">
+        <summary style="cursor:pointer; font-weight:600; color:#666; padding:12px 16px;">
+          ⚙️ 詳細設定（上級者向け・JSON編集）
+        </summary>
+        <div style="margin-top:12px; padding:16px;">
+          <p class="p text-sm text-muted" style="margin-bottom:8px;">
+            生成されたJSONを直接編集できます（通常は不要）
+          </p>
+          <textarea id="reg_draft" class="textarea mono" rows="12" placeholder="解釈結果のJSONがここに表示されます" style="font-size:12px;"></textarea>
+        </div>
+      </details>
+
+      <!-- 実行結果 -->
       <div id="reg_result" class="p"></div>
     </section>
 
+    <!-- ローディングオーバーレイ -->
     <div id="reg_overlay" class="overlay is-hidden" aria-hidden="true">
       <div class="overlay-inner">
         <div class="spinner"></div>
@@ -687,9 +725,11 @@ export function renderRegisterTab(app) {
     }
     return errors;
   }
+
   function fmtWarnBadge_(label) {
     return `<span class="badge badge-warn">⚠ ${escapeHtml(label)}</span>`;
   }
+
   function renderEditor_(draft) {
     if (!previewEl) return;
     const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
@@ -712,8 +752,8 @@ export function renderRegisterTab(app) {
       const endHm = calcEndHmFromStartAndCourse_(st || "09:00", course || "30min");
 
       const warnBadges = [
-        (timeHint === "unspecified") ? fmtWarnBadge_("時間は仮設定（必要に応じてカレンダーで調整）") : "",
-        (!course) ? fmtWarnBadge_("コースは仮設定（30min）") : "",
+        (timeHint === "unspecified") ? fmtWarnBadge_("時間は仮設定") : "",
+        (!course) ? fmtWarnBadge_("コース仮設定") : "",
       ].filter(Boolean).join(" ");
 
       const typeOptions = Object.keys(VISIT_TYPE_LABELS).map(k => {
@@ -722,53 +762,64 @@ export function renderRegisterTab(app) {
       }).join("");
 
       return `
-        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}">
-          <div class="preview-row-top">
-            <div>
-              <div class="preview-title">#${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}</div>
-              <div class="preview-meta">
-                ${warnBadges || ""}
+        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:16px; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #eee;">
+            <div style="flex:1;">
+              <div style="font-size:16px; font-weight:600; color:#333; margin-bottom:6px;">
+                📅 #${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}
               </div>
+              ${warnBadges ? `<div style="margin-top:6px;">${warnBadges}</div>` : ""}
             </div>
-            <div class="row" style="gap:8px;">
-              <button class="btn btn-sm" type="button" data-action="dup" ${locked ? "disabled" : ""}>複製</button>
-              <button class="btn btn-sm" type="button" data-action="del" ${locked ? "disabled" : ""}>削除</button>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-sm" type="button" data-action="dup" ${locked ? "disabled" : ""} title="この予約を複製">📋 複製</button>
+              <button class="btn btn-sm" type="button" data-action="del" ${locked ? "disabled" : ""} title="この予約を削除" style="color:#d32f2f;">🗑️ 削除</button>
             </div>
           </div>
 
-          <div class="edit-grid">
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:12px;">
             <div>
-              <div class="label-sm">開始</div>
-              <input class="input mono" data-field="start_time" value="${escapeHtml(st || "09:00")}" ${locked ? "disabled" : ""} />
+              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">⏰ 開始時刻</label>
+              <input class="input mono" data-field="start_time" value="${escapeHtml(st || "09:00")}" ${locked ? "disabled" : ""} style="font-size:14px;" />
             </div>
             <div>
-              <div class="label-sm">終了</div>
-              <input class="input mono" value="${escapeHtml(endHm)}" disabled />
+              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">⏱️ 終了時刻</label>
+              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="font-size:14px;" />
             </div>
             <div>
-              <div class="label-sm">コース</div>
+              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">📦 コース</label>
               <select class="input" data-field="course" ${locked ? "disabled" : ""}>
                 ${courseSelectHtml_(course || "30min")}
               </select>
             </div>
             <div>
-              <div class="label-sm">タイプ</div>
+              <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">🏷️ タイプ</label>
               <select class="input" data-field="visit_type" ${locked ? "disabled" : ""}>${typeOptions}</select>
             </div>
           </div>
 
-          <div style="margin-top:8px;">
-            <div class="label-sm">メモ</div>
-            <textarea class="textarea" rows="2" data-field="memo" ${locked ? "disabled" : ""}>${escapeHtml(memo)}</textarea>
+          <div>
+            <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555;">📝 メモ</label>
+            <textarea class="textarea" rows="2" data-field="memo" ${locked ? "disabled" : ""} placeholder="この訪問に関するメモ（任意）">${escapeHtml(memo)}</textarea>
           </div>
         </div>
       `;
     }).join("");
 
     previewEl.innerHTML = `
-      <div class="card">
-        <p class="p"><b>登録候補（修正可）</b></p>
-        ${locked ? `<p class="p text-sm text-muted">先に顧客を確定してください（顧客未確定の間は編集できません）。</p>` : `<p class="p text-sm text-muted">必要に応じて修正してください（時間/コースの仮設定は黄色表示です）。</p>`}
+      <div class="card" style="padding:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <div>
+            <h2 style="font-size:18px; font-weight:600; margin:0 0 4px 0;">ステップ3: 登録候補の確認・修正</h2>
+            <p class="p text-sm text-muted" style="margin:0;">
+              ${locked 
+                ? "⚠️ 先に顧客を確定してください（顧客未確定の間は編集できません）" 
+                : "必要に応じて時間・コース・メモを修正してください"}
+            </p>
+          </div>
+          <div style="font-size:24px; font-weight:600; color:#0066cc;">
+            ${visits.length}件
+          </div>
+        </div>
         <div class="preview-wrap">${cards}</div>
       </div>
     `;
@@ -860,14 +911,6 @@ export function renderRegisterTab(app) {
     refreshUI_();
     refreshFromDraftTextarea_();
   });
-
-  if (toggleJsonBtn) {
-    toggleJsonBtn.addEventListener("click", () => {
-      _jsonVisible = !_jsonVisible;
-      if (draftEl) draftEl.classList.toggle("is-hidden", !_jsonVisible);
-      toggleJsonBtn.textContent = _jsonVisible ? "JSONを隠す" : "JSONを表示";
-    });
-  }
 
   if (previewEl) {
     previewEl.addEventListener("click", (ev) => {
