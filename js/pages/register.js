@@ -740,7 +740,7 @@ export function renderRegisterTab(app) {
     const cards = visits.map((v, idx) => {
       const rowNum = v.row_num != null ? String(v.row_num) : String(idx + 1);
       const date = String(v.date || "").trim();
-      const st = String(v.start_time || "").trim();
+      const st = fmtHm_(v.start_time); // HH:mm形式に変換
       const course = String(v.course || "").trim();
       const vt = String(v.visit_type || "sitting").trim();
       const memo = String(v.memo || "");
@@ -758,9 +758,9 @@ export function renderRegisterTab(app) {
       }).join("");
 
       return `
-        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:12px; margin-bottom:12px; border:1px solid #ddd; border-radius:8px; background:#fff;">
+        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:12px; margin-bottom:12px;">
           <!-- ヘッダー部分：スマホで縦並び -->
-          <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #eee;">
+          <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
               <div style="font-size:15px; font-weight:600; color:#333; flex:1; min-width:0;">
                 <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
@@ -782,7 +782,7 @@ export function renderRegisterTab(app) {
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">⏱️ 終了</label>
-              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="background:#f5f5f5; font-size:14px;" />
+              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="font-size:14px;" />
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">📦 コース</label>
