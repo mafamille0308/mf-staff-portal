@@ -741,7 +741,8 @@ export function renderRegisterTab(app) {
               <div class="label-sm">コース</div>
               <select class="input" data-field="course" ${locked ? "disabled" : ""}>
                 ${courseSelectHtml_(course || "30min")}
-              </select>            </div>
+              </select>
+            </div>
             <div>
               <div class="label-sm">タイプ</div>
               <select class="input" data-field="visit_type" ${locked ? "disabled" : ""}>${typeOptions}</select>
