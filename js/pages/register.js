@@ -294,6 +294,51 @@ function renderCommitSummary_(u) {
   `;
 }
 
+/**
+ * bulkRegisterVisits の結果を UI 用に要約
+ * - “完了” 表示にするのは「全件成功」のときだけ
+ * - failed / skipped が1件でもあれば「一部未完了」
+ * - 成功0件かつ失敗/スキップがあるなら「失敗」
+ */
+function summarizeCommit_(u) {
+  const stats = (u && u.stats) ? u.stats : {};
+  const s = Number(stats.success || 0);
+  const f = Number(stats.failed || 0);
+  const k = Number(stats.skipped || 0);
+  const total = s + f + k;
+
+  // フォールバック：stats が無い場合は results から推定
+  if (!total) {
+    const rs = Array.isArray(u && u.results) ? u.results : [];
+    let ss = 0, ff = 0, kk = 0;
+    rs.forEach(r => {
+      const st = String(r && r.status || "");
+      if (st === "success") ss++;
+      else if (st === "failed") ff++;
+      else if (st === "skipped") kk++;
+    });
+    const tt = ss + ff + kk;
+    return { success: ss, failed: ff, skipped: kk, total: tt, allSuccess: (tt > 0 && ff === 0 && kk === 0), hasAnyFailure: (ff > 0 || kk > 0) };
+  }
+
+  return { success: s, failed: f, skipped: k, total, allSuccess: (total > 0 && f === 0 && k === 0), hasAnyFailure: (f > 0 || k > 0) };
+}
+
+function commitTitleAndToast_(sum) {
+  // sum.total が 0 のケースは異常系として “結果要確認”
+  if (!sum || !sum.total) {
+    return { title: "結果要確認", toastTitle: "結果要確認", toastMsg: "登録結果を確認してください（件数が取得できません）。" };
+  }
+  if (sum.allSuccess) {
+    return { title: "完了", toastTitle: "完了", toastMsg: `登録が完了しました（${sum.success}件）。` };
+  }
+  if (sum.success > 0 && sum.hasAnyFailure) {
+    return { title: "一部未完了", toastTitle: "一部未完了", toastMsg: `登録は一部完了です（成功${sum.success} / 失敗${sum.failed} / スキップ${sum.skipped}）。` };
+  }
+  // 成功0で失敗/スキップがある場合
+  return { title: "失敗", toastTitle: "失敗", toastMsg: `登録できませんでした（失敗${sum.failed} / スキップ${sum.skipped}）。` };
+}
+
 async function sha256Hex_(text) {
   // Web Crypto API：https環境 / GitHub PagesでOK
   const enc = new TextEncoder();
@@ -1115,17 +1160,20 @@ export function renderRegisterTab(app) {
       }, idToken);
 
       const u = unwrapResults(resp);
-      _lastCommitSucceeded = !!(u && u.success !== false);
+      const sum = summarizeCommit_(u);
+      _lastCommitSucceeded = !!(sum && sum.allSuccess); // 全件成功のみ true（部分失敗は “成功扱い” にしない）
       const summaryHtml = renderCommitSummary_(u);
       const msg = escapeHtml(prettyJson_(u));
+      const ui = commitTitleAndToast_(sum);
       resultEl.innerHTML = `
         ${summaryHtml}
         <div class="card">
           <p class="p"><b>完了</b></p>
+          <p class="p"><b>${escapeHtml(ui.title)}</b></p>
           <pre class="pre mono">${msg}</pre>
         </div>
       `;
-      toast({ title: "完了", message: "登録処理が完了しました。結果を確認してください。" });
+      toast({ title: ui.toastTitle, message: ui.toastMsg });
     } catch (e) {
       _lastCommitSucceeded = false;
       toast({ message: (e && e.message) ? e.message : String(e) });
