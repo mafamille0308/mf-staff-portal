@@ -318,12 +318,10 @@ export function renderRegisterTab(app) {
       <h1 class="h1">予約登録</h1>
       <p class="p text-muted" style="margin-top:-8px; margin-bottom:24px;">メール本文から予約候補を自動生成し、確認後に一括登録できます</p>
 
-      <!-- ステップ1: メール入力 -->
+      <!-- メール入力 -->
       <div class="card" style="margin-bottom:20px;">
-        <div style="margin-bottom:16px;">
-          <label class="label" style="margin-bottom:8px; display:block; font-weight:600;">ステップ1: メール本文を貼り付け</label>
-          <textarea id="reg_email" class="textarea" rows="8" placeholder="顧客からの依頼メールを貼り付けてください&#x0a;例: 1月10日から12日まで、朝夕2回ずつシッティングをお願いします。"></textarea>
-        </div>
+        <label class="label" style="margin-bottom:8px; display:block; font-weight:600;">メール本文</label>
+        <textarea id="reg_email" class="textarea" rows="8" placeholder="顧客からの依頼メールを貼り付けてください&#x0a;例: 1月10日から12日まで、朝夕2回ずつシッティングをお願いします。"></textarea>
         
         <!-- 補足情報（折りたたみ可能に） -->
         <details style="margin-top:16px;">
@@ -378,32 +376,18 @@ export function renderRegisterTab(app) {
       </div>
 
       <!-- 登録先サマリー -->
-      <div id="reg_assign_summary" class="card" style="margin-bottom:24px;">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:20px;">👤</span>
-          <div>
-            <p class="p text-sm text-muted" style="margin:0 0 2px 0;">登録先</p>
-            <p class="p" style="margin:0; font-weight:600;"><span id="reg_assign_summary_text">（未ログイン）</span></p>
-          </div>
-        </div>
+      <div id="reg_assign_summary" class="card" style="margin-bottom:20px;">
+        <p class="p" style="margin:0;"><b>登録先：</b><span id="reg_assign_summary_text">（未ログイン）</span></p>
       </div>
 
-      <!-- アクションボタン -->
-      <div class="row" style="gap:12px; margin-bottom:24px;">
-        <button id="reg_interpret" class="btn" style="flex:1; min-width:200px;">
-          🔍 ステップ2: 解釈（draft生成）
-        </button>
-        <button id="reg_commit" class="btn btn-primary" disabled style="flex:1; min-width:200px;">
-          ✅ ステップ4: 登録実行
+      <!-- 解釈ボタン -->
+      <div style="margin-bottom:24px;">
+        <button id="reg_interpret" class="btn" style="width:100%;">
+          🔍 予約候補を生成
         </button>
       </div>
 
-      <p class="p text-muted text-sm" style="margin-top:-16px; margin-bottom:32px; padding-left:4px;">
-        📋 手順: ① 解釈 → ② 顧客確定 → ③ 内容確認・修正 → ④ 登録実行
-      </p>
-
-      <!-- 顧客確定エリア -->
-      <div id="reg_customer_selected" class="is-hidden" style="margin-bottom:20px;"></div>
+      <!-- 顧客候補 -->
       <div id="reg_customer_candidates" class="is-hidden" style="margin-bottom:20px;"></div>
 
       <!-- 警告エリア -->
@@ -411,6 +395,13 @@ export function renderRegisterTab(app) {
 
       <!-- プレビュー/編集エリア -->
       <div id="reg_preview" class="is-hidden" style="margin-bottom:20px;"></div>
+
+      <!-- 登録実行ボタン（プレビュー下に移動） -->
+      <div id="reg_commit_wrapper" class="is-hidden" style="margin-bottom:24px;">
+        <button id="reg_commit" class="btn btn-primary" disabled style="width:100%;">
+          ✅ 登録実行
+        </button>
+      </div>
 
       <!-- 詳細設定（上級者向け） -->
       <div class="card" style="margin-bottom:20px;">
@@ -758,11 +749,11 @@ export function renderRegisterTab(app) {
       }).join("");
 
       return `
-        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:12px; margin-bottom:12px;">
+        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:12px; margin-bottom:12px; border:1px solid #ddd; border-radius:8px;">
           <!-- ヘッダー部分：スマホで縦並び -->
           <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #eee;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
-              <div style="font-size:15px; font-weight:600; flex:1; min-width:0;">
+              <div style="font-size:15px; font-weight:600; color:#333; flex:1; min-width:0;">
                 <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                   📅 #${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}
                 </div>
@@ -782,7 +773,7 @@ export function renderRegisterTab(app) {
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">⏱️ 終了</label>
-              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="font-size:14px;" />
+              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="background:#f5f5f5; font-size:14px;" />
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">📦 コース</label>
@@ -805,19 +796,14 @@ export function renderRegisterTab(app) {
     }).join("");
 
     previewEl.innerHTML = `
-      <div class="card" style="padding:20px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <div>
-            <h2 style="font-size:18px; font-weight:600; margin:0 0 4px 0;">ステップ3: 登録候補の確認・修正</h2>
-            <p class="p text-sm text-muted" style="margin:0;">
-              ${locked 
-                ? "⚠️ 先に顧客を確定してください（顧客未確定の間は編集できません）" 
-                : "必要に応じて時間・コース・メモを修正してください"}
-            </p>
-          </div>
-          <div style="font-size:24px; font-weight:600; color:#0066cc;">
-            ${visits.length}件
-          </div>
+      <div class="card" style="padding:16px;">
+        <div style="margin-bottom:16px;">
+          <h2 style="font-size:16px; font-weight:600; margin:0 0 4px 0;">登録候補（${visits.length}件）</h2>
+          <p class="p text-sm text-muted" style="margin:0;">
+            ${locked 
+              ? "⚠️ 先に上の顧客候補から選択してください" 
+              : "必要に応じて修正してください"}
+          </p>
         </div>
         <div class="preview-wrap">${cards}</div>
       </div>
