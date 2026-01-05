@@ -337,15 +337,15 @@ export function renderRegisterTab(app) {
             </div>
             <div class="hint-row" style="margin-bottom:10px;">
               <label class="hint-label" style="min-width:140px;">顧客特定ヒント</label>
-              <input id="reg_hint_customer_info" class="input" placeholder="例: 青葉区○○ / ぽち / マンション名 / 電話末尾1234" />
+              <input id="reg_hint_customer_info" class="input" placeholder="例: 青葉区○○ / マンション名" />
             </div>
             <div class="hint-row" style="margin-bottom:10px;">
               <label class="hint-label" style="min-width:140px;">訪問期間</label>
-              <input id="reg_hint_date" class="input" placeholder="例: 2026-01-01 - 2026-01-05 または 1/1 - 1/5" />
+              <input id="reg_hint_date" class="input" placeholder="例: 1/1 から 1/5" />
             </div>
             <div class="hint-row" style="margin-bottom:10px;">
               <label class="hint-label" style="min-width:140px;">訪問回数</label>
-              <input id="reg_hint_count" class="input" placeholder="例: 合計3回 / 1日2回" />
+              <input id="reg_hint_count" class="input" placeholder="例: 合計5回 / 初日と最終日は1回" />
             </div>
             <div class="hint-row" style="margin-bottom:10px;">
               <label class="hint-label" style="min-width:140px;">訪問時間</label>
@@ -355,9 +355,9 @@ export function renderRegisterTab(app) {
               <label class="hint-label" style="min-width:140px;">訪問タイプ</label>
               <input id="reg_hint_type" class="input" placeholder="例: シッティング / トレーニング / 打ち合わせ" />
             </div>
-            <div style="margin-bottom:0;">
-              <label class="label" style="margin-bottom:4px;">メモ</label>
-              <textarea id="reg_hint_memo" class="textarea" rows="2" placeholder="例: 鍵はポスト返却。給餌は1日2回。"></textarea>
+            <div class="hint-row" style="margin-bottom:10px;">
+              <label class="hint-label" style="min-width:140px;">メモ</label>
+              <textarea id="reg_hint_memo" class="textarea" rows="2" placeholder="例: 最終回：鍵はポスト返却。"></textarea>
             </div>
           </div>
         </details>
@@ -396,7 +396,7 @@ export function renderRegisterTab(app) {
       <!-- プレビュー/編集エリア -->
       <div id="reg_preview" class="is-hidden" style="margin-bottom:20px;"></div>
 
-      <!-- 登録実行ボタン（プレビュー下に移動） -->
+      <!-- 登録実行ボタン -->
       <div id="reg_commit_wrapper" class="is-hidden" style="margin-bottom:24px;">
         <button id="reg_commit" class="btn btn-primary" disabled style="width:100%;">
           ✅ 登録実行
@@ -753,7 +753,7 @@ export function renderRegisterTab(app) {
           <!-- ヘッダー部分：スマホで縦並び -->
           <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #eee;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
-              <div style="font-size:15px; font-weight:600; color:#333; flex:1; min-width:0;">
+              <div style="font-size:15px; font-weight:600; flex:1; min-width:0;">
                 <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                   📅 #${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}
                 </div>
@@ -773,7 +773,7 @@ export function renderRegisterTab(app) {
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">⏱️ 終了</label>
-              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="background:#f5f5f5; font-size:14px;" />
+              <input class="input mono" value="${escapeHtml(endHm)}" disabled style="font-size:14px;" />
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">📦 コース</label>
