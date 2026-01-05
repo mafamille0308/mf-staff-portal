@@ -397,7 +397,7 @@ export function renderRegisterTab(app) {
       <div id="reg_preview" class="is-hidden" style="margin-bottom:20px;"></div>
 
       <!-- 登録実行ボタン -->
-      <div id="reg_commit_wrapper" class="is-hidden" style="margin-bottom:24px;">
+      <div style="margin-bottom:24px;">
         <button id="reg_commit" class="btn btn-primary" disabled style="width:100%;">
           ✅ 登録実行
         </button>
