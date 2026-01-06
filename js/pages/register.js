@@ -1008,7 +1008,26 @@ export function renderRegisterTab(app) {
       const v = visits[idx];
       if (!v) return;
 
-      if (field === "start_time") {
+      if (field === "date") {
+        // date変更時は start_time の日付部分も必ず追従させる
+        const ymd = String(el.value || "").trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+          toast({ message: "日付の形式が不正です。再入力してください。" });
+          return;
+        }
+        v.date = ymd;
+
+        // start_time があれば HH:mm を保持して ISO を再生成
+        const hm = fmtHm_(v.start_time) || "09:00";
+        const iso = isoFromDateAndHmJst_(ymd, hm);
+        if (!iso) {
+          toast({ message: "開始時刻の再計算に失敗しました。" });
+          return;
+        }
+        v.start_time = iso;
+        v.time_hint = "fixed";
+
+      } else if (field === "start_time") {
         // time入力は "HH:mm" なので、draft(JSON)はISO(+09:00)に戻して統一する
         const iso = isoFromDateAndHmJst_(v.date, el.value);
         if (!iso) {
