@@ -48,6 +48,17 @@ function fmtHm_(t) {
 }
 
 /**
+ * "YYYY-MM-DD" + "HH:mm" -> "YYYY-MM-DDTHH:mm:00+09:00"
+ * - draft JSON を ISO で統一するために使用
+ */
+function isoFromDateAndHmJst_(dateYmd, hm) {
+  const date = String(dateYmd || "").trim();
+  const t = fmtHm_(hm); // "09:00" に正規化
+  if (!date || !t) return "";
+  return `${date}T${t}:00+09:00`;
+}
+
+/**
  * コース選択肢（UI用）
  * - GAS側 CONFIG.COURSE_MINUTES があればそれを使って minutes 昇順に整列
  * - ない場合は最低限の固定候補を用意（30/60/90）
@@ -991,7 +1002,13 @@ export function renderRegisterTab(app) {
       if (!v) return;
 
       if (field === "start_time") {
-        v.start_time = String(el.value || "").trim();
+        // time入力は "HH:mm" なので、draft(JSON)はISO(+09:00)に戻して統一する
+        const iso = isoFromDateAndHmJst_(v.date, el.value);
+        if (!iso) {
+          toast({ message: "開始時刻の形式が不正です。再入力してください。" });
+          return;
+        }
+        v.start_time = iso;
         v.time_hint = "fixed";
       } else if (field === "course") {
         v.course = String(el.value || "").trim();
