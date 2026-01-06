@@ -811,7 +811,14 @@ export function renderRegisterTab(app) {
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
               <div style="font-size:15px; font-weight:600; flex:1; min-width:0;">
                 <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                  📅 #${escapeHtml(rowNum)} ${escapeHtml(date || "(日付不明)")}
+                  📅 #${escapeHtml(rowNum)}
+                  <input type="date"
+                    class="input mono"
+                    data-field="date"
+                    value="${escapeHtml(date || "")}"
+                    ${locked ? "disabled" : ""}
+                    style="margin-left:8px; width:auto; display:inline-block; font-size:14px;"
+                  />
                 </div>
               </div>
               <div style="display:flex; gap:6px; flex-shrink:0;">
