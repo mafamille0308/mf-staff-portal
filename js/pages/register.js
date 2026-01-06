@@ -1042,6 +1042,15 @@ export function renderRegisterTab(app) {
         v.visit_type = String(el.value || "").trim();
       } else if (field === "memo") {
         v.memo = String(el.value || "");
+        // memo は debounce（即時再描画しない）
+        if (_memoDebounceTimer) {
+          clearTimeout(_memoDebounceTimer);
+        }
+        _memoDebounceTimer = setTimeout(() => {
+          refreshUI_();
+        }, 300);
+
+        return; // 下の即時 refresh を止める
       }
       // end_time は UI編集不可・payload送信不可：万一残っていてもここで破棄
       try { delete v.end_time; } catch (e) {}
