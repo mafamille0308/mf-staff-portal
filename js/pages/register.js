@@ -668,6 +668,7 @@ export function renderRegisterTab(app) {
       const memo = r.memo || "";
       const address = r.address || "";
       const petNames = Array.isArray(r.pet_names) ? r.pet_names : [];
+      const petsLine = petNames.length ? petNames.join("/") : "";
 
         const picked = 
           (_selectedCustomer &&
@@ -700,8 +701,8 @@ export function renderRegisterTab(app) {
                   : ""
                 }
 
-                ${petNames.length
-                  ? `<div class="candidate-meta text-sm">ペット：${escapeHtml(petNames.join(" / "))}</div>`
+                ${petsLine
+                  ? `<div class="candidate-meta text-sm">ペット：${escapeHtml(petsLine)}</div>`
                   : ""
                 }
 
@@ -1137,23 +1138,46 @@ export function renderRegisterTab(app) {
       const idToken = getIdToken();
       if (!idToken) throw new Error("未ログインです。ログインし直してください。");
 
-      const resp = await callGas(
-        {
-          action: "searchCustomerCandidates",
-          name_query: nameQuery,
-          hint_query: hintQuery,
-          limit: 20,
-        },
-        idToken
-      );
+     // 安全優先の検索順序：
+     // - name がある：まず name のみ（hintは使わない）
+     //   - 0件なら救済で name+hint
+     //   - 複数なら hint がある場合のみ name+hint（絞り/再ランク）
+     // - name がない：hint のみ
 
-      const { results } = unwrapResults(resp);
+     async function call_(nq, hq) {
+       const resp = await callGas({
+         action: "searchCustomerCandidates",
+         name_query: nq,
+         hint_query: hq,
+         limit: 20,
+       }, idToken);
+       const u = unwrapResults(resp) || {};
+       return (u && Array.isArray(u.results)) ? u.results : [];
+     }
 
-      renderCustomerCandidates_({
-        status: "loaded",
-        name: nameQuery || hintQuery,
-        results: results || [],
-      });
+     let results = [];
+     if (nameQuery) {
+       // 1st: name only
+       results = await call_(nameQuery, "");
+
+       if (results.length === 0 && hintQuery) {
+         // fallback: name + hint
+         results = await call_(nameQuery, hintQuery);
+       } else if (results.length >= 2 && hintQuery) {
+         // narrow/rerank with hint (if it helps)
+         const r2 = await call_(nameQuery, hintQuery);
+         if (r2.length > 0) results = r2;
+       }
+     } else {
+       // name empty: hint only
+       results = await call_("", hintQuery);
+     }
+
+     renderCustomerCandidates_({
+       status: "loaded",
+       name: nameQuery || hintQuery,
+       results,
+     });
 
     } catch (e) {
       renderCustomerCandidates_({
