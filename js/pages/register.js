@@ -513,6 +513,7 @@ export function renderRegisterTab(app) {
   let _customerLookupTimer = null;
   let _lastCommitHash = "";
   let _lastCommitRequestId = "";
+  let _memoDebounceTimer = null;
 
   ensureCourseOptions_().then(() => { try { refreshUI_(); } catch (e) {} });
 
@@ -1041,16 +1042,17 @@ export function renderRegisterTab(app) {
       } else if (field === "visit_type") {
         v.visit_type = String(el.value || "").trim();
       } else if (field === "memo") {
+        // メモは即座にデータに反映するが、UI更新はデバウンス
         v.memo = String(el.value || "");
-        // memo は debounce（即時再描画しない）
+
         if (_memoDebounceTimer) {
           clearTimeout(_memoDebounceTimer);
         }
         _memoDebounceTimer = setTimeout(() => {
-          refreshUI_();
+          syncDraftTextarea_(); // JSONテキストエリアだけ更新
         }, 300);
 
-        return; // 下の即時 refresh を止める
+        return; // UI全体の再描画は不要（入力モード維持のため）
       }
       // end_time は UI編集不可・payload送信不可：万一残っていてもここで破棄
       try { delete v.end_time; } catch (e) {}
