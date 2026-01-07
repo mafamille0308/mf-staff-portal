@@ -666,23 +666,55 @@ export function renderRegisterTab(app) {
       const kana = r.kana || r.name_kana || "";
       const id = r.id || r.customer_id || "";
       const memo = r.memo || "";
-        const picked = (_selectedCustomer && _selectedCustomer.customer_id && String(_selectedCustomer.customer_id) === String(id)) ? "checked" : "";
+      const address = r.address || "";
+      const petNames = Array.isArray(r.pet_names) ? r.pet_names : [];
+
+        const picked = 
+          (_selectedCustomer &&
+            _selectedCustomer.customer_id &&
+            String(_selectedCustomer.customer_id) === String(id))
+            ? "checked"
+            : "";
+
         return `
           <label class="candidate-row candidate-pick">
             <div class="row" style="align-items:flex-start; gap:10px;">
-              <input type="radio" name="reg_customer_pick" value="${escapeHtml(id)}" data-idx="${idx}" ${picked} />
+              <input
+                type="radio"
+                name="reg_customer_pick"
+                value="${escapeHtml(id)}"
+                data-idx="${idx}"
+                ${picked}
+              />
               <div style="flex:1;">
-                <div class="candidate-title">#${idx + 1} ${escapeHtml(name || "(名称不明)")}</div>
+                <div class="candidate-title">
+                  #${idx + 1} ${escapeHtml(name || "(名称不明)")}
+                </div>
+
                 <div class="candidate-meta text-muted text-sm">
-                  ${id ? `ID: ${escapeHtml(id)} ` : ""}
+                  ${id ? `ID: ${escapeHtml(id)}` : ""}
                   ${kana ? ` / ${escapeHtml(kana)}` : ""}
                 </div>
-                ${memo ? `<div class="candidate-memo text-sm">${escapeHtml(memo)}</div>` : ""}
+
+                ${address
+                  ? `<div class="candidate-meta text-sm">住所：${escapeHtml(address)}</div>`
+                  : ""
+                }
+
+                ${petNames.length
+                  ? `<div class="candidate-meta text-sm">ペット：${escapeHtml(petNames.join(" / "))}</div>`
+                  : ""
+                }
+
+                ${memo
+                  ? `<div class="candidate-memo text-sm">${escapeHtml(memo)}</div>`
+                  : ""
+                }
               </div>
             </div>
           </label>
         `;
-    }).join("");
+      }).join("");
 
     customerCandidatesEl.innerHTML = `
       <div class="card ${count > 1 ? "card-warning" : ""}">
@@ -903,19 +935,27 @@ export function renderRegisterTab(app) {
   function buildHintText_() {
     const hints = [
       { label: "顧客名", el: hintCustomerEl },
-      { label: "ペット情報", el: hintCustomerInfoEl },
-      { label: "訪問日時", el: hintDateEl },
+      { label: "訪問期間", el: hintDateEl },
       { label: "訪問回数", el: hintCountEl },
       { label: "訪問時間", el: hintTimeEl },
       { label: "訪問タイプ", el: hintTypeEl },
       { label: "メモ", el: hintMemoEl },
     ];
-    const lines = hints
+
+    const items = hints
       .map(({ label, el }) => ({ label, value: String(el?.value || "").trim() }))
-      .filter(({ value }) => !!value)
-      .map(({ label, value }) => `${label}：${value}`);
-    if (!lines.length) return "";
-    return `補足が必要な場合\n${lines.join("\n")}`;
+      .filter(({ value }) => !!value);
+
+    if (!items.length) return "";
+
+    // GPTに「本文が曖昧ならこの補足を優先せよ」という意図を明確化
+    const lines = items.map(({ label, value }) => `- ${label}: ${value}`);
+
+    return [
+      "【補足（解釈のための制約条件）】",
+      "本文が曖昧な場合は、以下の補足を優先して解釈してください。",
+      ...lines,
+    ].join("\n");
   }
 
   function parseDraftFromTextarea_() {
@@ -1070,42 +1110,51 @@ export function renderRegisterTab(app) {
   async function fetchCustomerCandidates_(draft) {
     const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
     const first = visits[0] || {};
-    const name = String(first.customer_name || "").trim();
-    if (!name) {
+
+    // 顧客名（従来キー）
+    const nameQuery = String(first.customer_name || "").trim();
+
+    // 顧客特定ヒント（住所断片 / ペット名）
+    const hintQuery = String(hintCustomerInfoEl?.value || "").trim();
+
+    if (!nameQuery && !hintQuery) {
       renderCustomerCandidates_(null);
       return;
     }
-    renderCustomerCandidates_({ status: "loading", name });
+
+    renderCustomerCandidates_({
+      status: "loading",
+      name: nameQuery || hintQuery,
+    });
+
     try {
       const idToken = getIdToken();
       if (!idToken) throw new Error("未ログインです。ログインし直してください。");
-      const resp = await callGas({ action: "searchCustomers", query: name }, idToken);
+
+      const resp = await callGas(
+        {
+          action: "searchCustomerCandidates",
+          name_query: nameQuery,
+          hint_query: hintQuery,
+          limit: 20,
+        },
+        idToken
+      );
+
       const { results } = unwrapResults(resp);
-      let list = results || [];
 
-      // 顧客特定ヒントがあれば、候補が複数のときだけ「一致度順」に並べ替える
-      // 例: 住所の一部 / 建物名 / 電話末尾 など
-      const hint = String(hintCustomerInfoEl?.value || "").trim();
-      if (hint && Array.isArray(list) && list.length > 1) {
-        const h = hint.toLowerCase();
-        list = list
-          .map((r) => {
-            const addr = String(r.address_full || r.address || "").toLowerCase();
-            const phone = String(r.phone || "").toLowerCase();
-            const notes = String(r.notes || r.memo || "").toLowerCase();
-            const score =
-              (addr.includes(h) ? 3 : 0) +
-              (phone.includes(h) ? 2 : 0) +
-              (notes.includes(h) ? 1 : 0);
-            return { r, score };
-          })
-          .sort((a, b) => (b.score - a.score))
-          .map((x) => x.r);
-      }
+      renderCustomerCandidates_({
+        status: "loaded",
+        name: nameQuery || hintQuery,
+        results: results || [],
+      });
 
-      renderCustomerCandidates_({ status: "loaded", name, results: list });
     } catch (e) {
-      renderCustomerCandidates_({ status: "error", name, error: (e && e.message) ? e.message : String(e) });
+      renderCustomerCandidates_({
+        status: "error",
+        name: nameQuery || hintQuery,
+        error: (e && e.message) ? e.message : String(e),
+      });
     }
   }
 
