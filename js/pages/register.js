@@ -372,7 +372,7 @@ export function renderRegisterTab(app) {
   render(app, `
     <section class="section">
       <h1 class="h1">予約登録</h1>
-      <p class="p text-muted" style="margin-top:-8px; margin-bottom:24px;">メール本文から予約候補を自動生成し、確認後に一括登録できます</p>
+      <p class="p text-sm text-muted" style="margin-top:-8px; margin-bottom:24px;">依頼メールから予約候補を自動生成し、確認後に一括登録できます</p>
 
       <!-- メール入力 -->
       <div class="card" style="margin-bottom:20px;">
@@ -382,10 +382,10 @@ export function renderRegisterTab(app) {
         <!-- 補足情報（折りたたみ可能に） -->
         <details style="margin-top:16px;">
           <summary style="cursor:pointer; font-weight:600; color:#666; padding:8px 0;">
-            📝 補足情報を追加（任意・クリックで展開）
+            📝 補足情報を追加（タップで展開）
           </summary>
           <div style="margin-top:12px;">
-            <p class="p text-sm text-muted" style="margin-bottom:12px;">メール本文だけで情報が不足している場合に入力してください</p>
+            <p class="p text-sm text-muted" style="margin-bottom:12px;">補足情報を追加するとAIの解釈精度が向上します</p>
             
             <div class="hint-row" style="margin-bottom:10px;">
               <label class="hint-label" style="min-width:140px;">顧客名</label>
@@ -393,7 +393,7 @@ export function renderRegisterTab(app) {
             </div>
             <div class="hint-row" style="margin-bottom:10px;">
               <label class="hint-label" style="min-width:140px;">顧客特定ヒント</label>
-              <input id="reg_hint_customer_info" class="input" placeholder="例: 青葉区○○ / マンション名" />
+              <input id="reg_hint_customer_info" class="input" placeholder="例: 住所の一部 / マンション名 / ペット名" />
             </div>
             <div class="hint-row" style="margin-bottom:10px;">
               <label class="hint-label" style="min-width:140px;">訪問期間</label>
@@ -436,7 +436,7 @@ export function renderRegisterTab(app) {
         <p class="p" style="margin:0;"><b>登録先：</b><span id="reg_assign_summary_text">（未ログイン）</span></p>
       </div>
 
-      <!-- 解釈ボタン -->
+      <!-- AI解釈ボタン -->
       <div style="margin-bottom:24px;">
         <button id="reg_interpret" class="btn" style="width:100%;">
           🔍 予約候補を生成
@@ -465,7 +465,7 @@ export function renderRegisterTab(app) {
           <p class="p"><b>詳細設定（上級者向け）</b>：JSONを直接編集できます</p>
           <button id="reg_toggle_json" class="btn btn-sm" type="button">JSONを表示</button>
         </div>
-        <textarea id="reg_draft" class="textarea mono is-hidden" rows="12" placeholder="解釈結果がここに入ります（上級者向け）。" style="font-size:12px;"></textarea>
+        <textarea id="reg_draft" class="textarea mono is-hidden" rows="12" placeholder="AIの解釈結果がここに入ります（上級者向け）。" style="font-size:12px;"></textarea>
       </div>
 
       <!-- 実行結果 -->
@@ -719,7 +719,7 @@ export function renderRegisterTab(app) {
     customerCandidatesEl.innerHTML = `
       <div class="card ${count > 1 ? "card-warning" : ""}">
         <p class="p"><b>${escapeHtml(title)}</b></p>
-        <p class="p text-sm text-muted">キー：${escapeHtml(state.name)}（最終確定はGAS側で行われます）</p>
+        <p class="p text-sm text-muted">キー：${escapeHtml(state.name)}</p>
         ${list ? `<div class="candidate-list">${list}</div>` : ""}
       </div>
     `;
@@ -759,7 +759,7 @@ export function renderRegisterTab(app) {
     customerSelectedEl.innerHTML = `
       <div class="card">
         <p class="p"><b>顧客確定</b>：${escapeHtml(name)} ${id ? `<span class="badge">ID:${escapeHtml(id)}</span>` : ""}</p>
-        <p class="p text-sm text-muted">顧客を変更する場合は「解釈」からやり直してください（誤登録防止のため）。</p>
+        <p class="p text-sm text-muted">顧客を変更する場合は、顧客名を指定して再生成してください。</p>
       </div>
     `;
     customerSelectedEl.classList.remove("is-hidden");
@@ -904,7 +904,7 @@ export function renderRegisterTab(app) {
           <p class="p text-sm text-muted" style="margin:0;">
             ${locked 
               ? "⚠️ 先に上の顧客候補から選択してください" 
-              : "必要に応じて修正してください"}
+              : "⚠️ AIの解釈は正確とは限りません。必要に応じて修正してください。"}
           </p>
         </div>
         <div class="preview-wrap">${cards}</div>
@@ -1202,7 +1202,7 @@ export function renderRegisterTab(app) {
     const hintText = buildHintText_();
     const mergedText = hintText ? `${emailText}\n\n${hintText}\n` : emailText;
 
-    setBusy(true, "解釈しています...");
+    setBusy(true, "AIが解釈しています...");
     resultEl.innerHTML = "";
     renderWarnings_([]);
     renderPreview_(null);
