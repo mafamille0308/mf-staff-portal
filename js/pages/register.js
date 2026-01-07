@@ -692,7 +692,6 @@ export function renderRegisterTab(app) {
                 </div>
 
                 <div class="candidate-meta text-muted text-sm">
-                  ${id ? `ID: ${escapeHtml(id)}` : ""}
                   ${kana ? ` / ${escapeHtml(kana)}` : ""}
                 </div>
 
@@ -778,7 +777,10 @@ export function renderRegisterTab(app) {
     };
 
     const visits = Array.isArray(_draftObj.visits) ? _draftObj.visits : [];
-    visits.forEach(v => { v.customer_id = id; });
+    visits.forEach(v => {
+      v.customer_id = id;
+      v.customer_name = _selectedCustomer.name || v.customer_name || "";
+    });
   }
 
   function computeHardErrors_(draft) {
@@ -918,7 +920,11 @@ export function renderRegisterTab(app) {
     renderCustomerSelected_();
     _hardErrors = computeHardErrors_(_draftObj);
 
-    const warnings = (_draftObj && Array.isArray(_draftObj.warnings)) ? _draftObj.warnings : [];
+    let warnings = (_draftObj && Array.isArray(_draftObj.warnings)) ? _draftObj.warnings : [];
+    // 顧客が確定しているなら、missing_customer_name は解消済み扱い（表示しない）
+    if (_selectedCustomer && _selectedCustomer.customer_id) {
+      warnings = warnings.filter(w => String(w && w.code || "") !== "missing_customer_name");
+    }
     const hardAsWarnings = _hardErrors.map(e => ({ code: e.code, message: e.message, row_nums: [] }));
     renderWarnings_([ ...warnings, ...hardAsWarnings ]);
 
