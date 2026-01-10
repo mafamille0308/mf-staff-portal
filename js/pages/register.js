@@ -350,6 +350,55 @@ function commitTitleAndToast_(sum) {
   return { title: "失敗", toastTitle: "失敗", toastMsg: `登録できませんでした（失敗${sum.failed} / スキップ${sum.skipped}）。` };
 }
 
+// ========= 診断（エラー時のみ表示＋コピー） =========
+function safeJson_(v) {
+  try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
+}
+
+async function copyToClipboard_(text) {
+  const s = String(text || "");
+  if (!s) return false;
+  // Clipboard API（HTTPS / GitHub Pages 想定）
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(s);
+      return true;
+    }
+  } catch (e) {}
+  // fallback
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = s;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch (e) {}
+  return false;
+}
+
+async function showDiagnosticModal_({ title = "診断情報", diagText = "" } = {}) {
+  const bodyHtml = `
+    <p class="p text-sm text-muted" style="margin:0 0 8px 0;">
+      以下をコピーして共有してください（個人情報を含めない設計です）。
+    </p>
+    <textarea class="textarea mono" rows="14" readonly style="font-size:12px;">${escapeHtml(diagText)}</textarea>
+  `;
+  const ok = await showModal({
+    title,
+    bodyHtml,
+    okText: "コピー",
+    cancelText: "閉じる",
+  });
+  if (!ok) return;
+  const copied = await copyToClipboard_(diagText);
+  toast({ title: copied ? "コピーしました" : "コピー失敗", message: copied ? "診断情報をクリップボードに保存しました。" : "手動でコピーしてください。" });
+}
+
 async function sha256Hex_(text) {
   // Web Crypto API：https環境 / GitHub PagesでOK
   const enc = new TextEncoder();
@@ -459,15 +508,6 @@ export function renderRegisterTab(app) {
         </button>
       </div>
 
-      <!-- 詳細設定（上級者向け） -->
-      <div class="card" style="margin-bottom:20px;">
-        <div class="row row-between" style="margin-bottom:12px;">
-          <p class="p"><b>詳細設定（上級者向け）</b>：JSONを直接編集できます</p>
-          <button id="reg_toggle_json" class="btn btn-sm" type="button">JSONを表示</button>
-        </div>
-        <textarea id="reg_draft" class="textarea mono is-hidden" rows="12" placeholder="AIの解釈結果がここに入ります（上級者向け）。" style="font-size:12px;"></textarea>
-      </div>
-
       <!-- 実行結果 -->
       <div id="reg_result" class="p"></div>
     </section>
@@ -492,7 +532,6 @@ export function renderRegisterTab(app) {
   const assignWrapEl = qs("#reg_assign");
   const assignStaffNameEl = qs("#reg_assign_staff_name");
   const assignSummaryTextEl = qs("#reg_assign_summary_text");
-  const draftEl = qs("#reg_draft");
   const interpretBtn = qs("#reg_interpret");
   const commitBtn = qs("#reg_commit");
   const resultEl = qs("#reg_result");
@@ -500,7 +539,6 @@ export function renderRegisterTab(app) {
   const previewEl = qs("#reg_preview");
   const customerCandidatesEl = qs("#reg_customer_candidates");
   const customerSelectedEl = qs("#reg_customer_selected");
-  const toggleJsonBtn = qs("#reg_toggle_json");
   const overlayEl = qs("#reg_overlay");
   const overlayTextEl = qs("#reg_overlay_text");
 
@@ -508,7 +546,6 @@ export function renderRegisterTab(app) {
   let _draftObj = null; // { visits:[], warnings:[] }
   let _selectedCustomer = null; // { customer_id, name, kana?, memo? }
   let _hardErrors = [];
-  let _jsonVisible = false;
   let _lastCommitSucceeded = false;
   let _customerLookupTimer = null;
   let _lastCommitHash = "";
@@ -913,13 +950,6 @@ export function renderRegisterTab(app) {
     previewEl.classList.remove("is-hidden");
   }
 
-  function syncDraftTextarea_() {
-    if (!draftEl) return;
-    if (!_draftObj) { draftEl.value = ""; return; }
-    draftEl.value = prettyJson_(_draftObj);
-    // draftEl には draftそのものを入れる（現行互換）
-  }
-
   function refreshUI_() {
     renderCustomerSelected_();
     _hardErrors = computeHardErrors_(_draftObj);
@@ -938,8 +968,6 @@ export function renderRegisterTab(app) {
     const hasCustomer = !!_selectedCustomer;
     const hasHardError = !!(_hardErrors && _hardErrors.length);
     commitBtn.disabled = _busy || !hasDraft || !hasCustomer || hasHardError;
-
-    syncDraftTextarea_();
   }
 
   function buildHintText_() {
@@ -966,57 +994,6 @@ export function renderRegisterTab(app) {
       "本文が曖昧な場合は、以下の補足を優先して解釈してください。",
       ...lines,
     ].join("\n");
-  }
-
-  function parseDraftFromTextarea_() {
-    const raw = String(draftEl.value || "").trim();
-    if (!raw) return { draft: null, error: null };
-    try {
-      const draft = JSON.parse(raw);
-      return { draft, error: null };
-    } catch (e) {
-      return { draft: null, error: e };
-    }
-  }
-
-  function refreshFromDraftTextarea_() {
-    if (!draftEl) return;
-    const raw = String(draftEl.value || "").trim();
-    if (!raw) {
-      _draftObj = null;
-      _selectedCustomer = null;
-      renderWarnings_([]);
-      renderCustomerCandidates_(null);
-      renderCustomerSelected_();
-      renderEditor_(null);
-      commitBtn.disabled = true;
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw);
-      const draft = parsed && parsed.draft ? parsed.draft : parsed;
-      _draftObj = draft;
-      const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
-      const cid = String((visits[0] && visits[0].customer_id) || "").trim();
-      if (!cid) _selectedCustomer = null;
-      refreshUI_();
-      scheduleCustomerLookup_(draft);
-    } catch (e) {
-      commitBtn.disabled = true;
-    }
-  }
-
-  draftEl.addEventListener("input", () => {
-    refreshUI_();
-    refreshFromDraftTextarea_();
-  });
-
-  if (toggleJsonBtn) {
-    toggleJsonBtn.addEventListener("click", () => {
-      _jsonVisible = !_jsonVisible;
-      if (draftEl) draftEl.classList.toggle("is-hidden", !_jsonVisible);
-      toggleJsonBtn.textContent = _jsonVisible ? "JSONを隠す" : "JSONを表示";
-    });
   }
 
   if (previewEl) {
@@ -1220,14 +1197,24 @@ export function renderRegisterTab(app) {
 
       _draftObj = data.draft;
       _selectedCustomer = null;
-      _jsonVisible = false;
-      if (draftEl) draftEl.classList.add("is-hidden");
-      if (toggleJsonBtn) toggleJsonBtn.textContent = "JSONを表示";
       refreshUI_();
       scheduleCustomerLookup_(_draftObj);
-      resultEl.innerHTML = `<div class="card"><p class="p">draftを生成しました。次に「顧客確定」を行い、必要に応じて候補を修正してから「登録実行」を押してください。</p></div>`;
+      resultEl.innerHTML = `<div class="card"><p class="p">登録候補を生成しました。顧客を選択し、内容を確認して「登録実行」を押してください。</p></div>`;
     } catch (e) {
-      toast({ message: (e && e.message) ? e.message : String(e) });
+      const msg = (e && e.message) ? e.message : String(e);
+      toast({ message: msg });
+      // 診断情報（エラー時のみ）
+      const user = getUser() || {};
+      const diag = {
+        client_time: nowIsoJst_(),
+        page: "register",
+        phase: "interpret",
+        role: user.role || "",
+        staff_id: user.staff_id || "",
+        org_id: user.org_id || "",
+        error_message: msg,
+      };
+      await showDiagnosticModal_({ title: "診断情報（解釈エラー）", diagText: safeJson_(diag) });
     } finally {
       setBusy(false);
     }
@@ -1236,17 +1223,8 @@ export function renderRegisterTab(app) {
   commitBtn.addEventListener("click", async () => {
     if (!_selectedCustomer) return toast({ message: "先に顧客を確定してください" });
     if (_busy) return;
-    const raw = String(draftEl.value || "").trim();
-    if (!raw) return;
-
-    let draft;
-    try {
-      draft = JSON.parse(raw);
-    } catch (e) {
-      return toast({ message: "draft JSON が壊れています！JSONとして解析できません。" });
-    }
-
-    const visits = Array.isArray(draft.visits) ? draft.visits : [];
+    const draft = _draftObj;
+    const visits = Array.isArray(draft && draft.visits) ? draft.visits : [];
     if (!visits.length) return toast({ message: "登録候補が0件です" });
 
     // commit payload：end_time は送らない（GASで start_time + course から再計算）
@@ -1298,21 +1276,59 @@ export function renderRegisterTab(app) {
       const u = unwrapResults(resp);
       const sum = summarizeCommit_(u);
       _lastCommitSucceeded = !!(sum && sum.allSuccess); // 全件成功のみ true（部分失敗は “成功扱い” にしない）
-      const summaryHtml = renderCommitSummary_(u);
-      const msg = escapeHtml(prettyJson_(u));
       const ui = commitTitleAndToast_(sum);
+      // 成功時は JSON を出さない（要約のみ）
+      const summaryHtml = renderCommitSummary_(u);
       resultEl.innerHTML = `
         ${summaryHtml}
         <div class="card">
-          <p class="p"><b>完了</b></p>
           <p class="p"><b>${escapeHtml(ui.title)}</b></p>
-          <pre class="pre mono">${msg}</pre>
+          <p class="p text-sm text-muted" style="margin:0;">
+            成功 ${sum.success} / 失敗 ${sum.failed} / スキップ ${sum.skipped}
+          </p>
         </div>
       `;
       toast({ title: ui.toastTitle, message: ui.toastMsg });
+
+      // 一部未完了/失敗のときだけ診断コピーを提示
+      if (!sum.allSuccess) {
+        const metaRid = (resp && resp._meta && resp._meta.request_id) ? resp._meta.request_id : _lastCommitRequestId;
+        const user = getUser() || {};
+        const diag = {
+          client_time: nowIsoJst_(),
+          page: "register",
+          phase: "commit",
+          action: "bulkRegisterVisits",
+          request_id: metaRid,
+          content_hash: _lastCommitHash,
+          role: user.role || "",
+          staff_id: user.staff_id || "",
+          org_id: user.org_id || "",
+          commit_summary: sum,
+        };
+        await showDiagnosticModal_({ title: "診断情報（登録が一部未完了）", diagText: safeJson_(diag) });
+      }
     } catch (e) {
       _lastCommitSucceeded = false;
-      toast({ message: (e && e.message) ? e.message : String(e) });
+      const msg = (e && e.message) ? e.message : String(e);
+      toast({ message: msg });
+      // ApiError なら request_id を拾う（GAS RequestLogs 追跡用）
+      const rid = (e && (e.request_id || (e.detail && e.detail.request_id))) ? (e.request_id || e.detail.request_id) : _lastCommitRequestId;
+      const user = getUser() || {};
+      const diag = {
+        client_time: nowIsoJst_(),
+        page: "register",
+        phase: "commit",
+        action: "bulkRegisterVisits",
+        request_id: rid,
+        content_hash: _lastCommitHash,
+        role: user.role || "",
+        staff_id: user.staff_id || "",
+        org_id: user.org_id || "",
+        error_message: msg,
+        error_detail: (e && e.detail) ? e.detail : null,
+      };
+      await showDiagnosticModal_({ title: "診断情報（登録エラー）", diagText: safeJson_(diag) });
     } finally {
       setBusy(false);
     }

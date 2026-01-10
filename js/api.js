@@ -12,6 +12,7 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.request_id = (detail && detail.request_id) ? String(detail.request_id) : "";
   }
 }
 
@@ -28,8 +29,9 @@ export async function callGas(payload, idToken) {
     throw new ApiError("未ログインです（id_tokenがありません）。");
   }
 
+  const rid = (payload && payload.request_id) ? String(payload.request_id) : newRequestId();
   const body = {
-    request_id: newRequestId(),
+    request_id: rid,
     id_token: idToken,
     ...payload,
   };
@@ -45,11 +47,26 @@ export async function callGas(payload, idToken) {
   let json = null;
   try { json = JSON.parse(text); }
   catch (e) {
-    throw new ApiError("GAS応答のJSON解析に失敗しました。", { status: resp.status, detail: text });
+    throw new ApiError("GAS応答のJSON解析に失敗しました。", {
+      status: resp.status,
+      detail: { request_id: rid, raw_text: text },
+    });
   }
 
+ // 診断用メタ
+  try {
+    if (json && typeof json === "object") {
+      json._meta = { request_id: rid, http_status: resp.status };
+    } else if (Array.isArray(json)) {
+      json._meta = { request_id: rid, http_status: resp.status };
+    }
+  } catch (e) {}
+
   if (!resp.ok) {
-    throw new ApiError(`HTTP ${resp.status}`, { status: resp.status, detail: json });
+    throw new ApiError(`HTTP ${resp.status}`, {
+      status: resp.status,
+      detail: { request_id: rid, response: json },
+    });
   }
   if (json && json.ok === false) {
     // 認証エラーならtokenを破棄し、再ログインに寄せる
@@ -58,10 +75,13 @@ export async function callGas(payload, idToken) {
       clearIdToken();
       throw new ApiError("認証の有効期限が切れました。再ログインしてください。", {
         status: resp.status,
-        detail: json,
+        detail: { request_id: rid, response: json },
       });
     }
-    throw new ApiError(json.error || "GASでエラーが発生しました。", { status: resp.status, detail: json });
+    throw new ApiError(json.error || "GASでエラーが発生しました。", {
+      status: resp.status,
+      detail: { request_id: rid, response: json },
+    });
   }
 
   return json;
