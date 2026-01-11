@@ -1292,6 +1292,7 @@ export function renderRegisterTab(app) {
 
       // 一部未完了/失敗のときだけ診断コピーを提示
       if (!sum.allSuccess) {
+        try { setBusy(false); } catch (e) {}
         const metaRid = (resp && resp._meta && resp._meta.request_id) ? resp._meta.request_id : _lastCommitRequestId;
         const user = getUser() || {};
         const diag = {
@@ -1312,6 +1313,8 @@ export function renderRegisterTab(app) {
       _lastCommitSucceeded = false;
       const msg = (e && e.message) ? e.message : String(e);
       toast({ message: msg });
+      try { setBusy(false); } catch (e2) {}
+      
       // ApiError なら request_id を拾う（GAS RequestLogs 追跡用）
       const rid = (e && (e.request_id || (e.detail && e.detail.request_id))) ? (e.request_id || e.detail.request_id) : _lastCommitRequestId;
       const user = getUser() || {};
