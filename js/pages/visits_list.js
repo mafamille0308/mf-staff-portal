@@ -28,6 +28,10 @@ function isDone_(v) {
   return toBool(v.done) || toBool(v.is_done);
 }
 
+function isActive_(v) {
+  return !(v.is_active === false || String(v.is_active || "").toLowerCase() === "false");
+}
+
 function pickVisitType_(v) {
   return String(v.visit_type || v.type || "").trim();
 }
@@ -161,6 +165,7 @@ export async function renderVisitsList(appEl, query) {
     sort_order: "asc", // 近い順（運用上、次の予定が見やすい）
     done_filter: "open_first", // open_first | open_only | done_only | all
     type_filter: "all", // all | <visit_type>
+    active_filter: "active_only", // active_only | include_deleted
   };
 
   render(appEl, `
@@ -209,6 +214,13 @@ export async function renderVisitsList(appEl, query) {
             </select>
           </div>
           <div class="row">
+            <div class="p">削除済み</div>
+            <select id="vfActiveFilter" class="select">
+              <option value="active_only">除外（デフォルト）</option>
+              <option value="include_deleted">含める</option>
+            </select>
+          </div>
+          <div class="row">
             <div class="p">並び順</div>
             <select id="vfSortOrder" class="select">
               <option value="asc">日時：近い順</option>
@@ -234,6 +246,7 @@ export async function renderVisitsList(appEl, query) {
   const kwEl = appEl.querySelector("#vfKeyword");
   const doneEl = appEl.querySelector("#vfDoneFilter");
   const typeEl = appEl.querySelector("#vfTypeFilter");
+  const activeEl = appEl.querySelector("#vfActiveFilter");
   const sortEl = appEl.querySelector("#vfSortOrder");
   const badgesEl = appEl.querySelector("#vfStatusBadges");
 
@@ -242,6 +255,7 @@ export async function renderVisitsList(appEl, query) {
   if (kwEl) kwEl.value = state.keyword;
   if (doneEl) doneEl.value = state.done_filter;
   if (typeEl) typeEl.value = state.type_filter;
+  if (activeEl) activeEl.value = state.active_filter;
   if (sortEl) sortEl.value = state.sort_order;
 
   // ===== 一覧state =====
@@ -274,10 +288,12 @@ export async function renderVisitsList(appEl, query) {
       state.done_filter === "all" ? "すべて" :
       "未完了優先";
     const typeLabel = (state.type_filter && state.type_filter !== "all") ? state.type_filter : "すべて";    
+    const activeLabel = (state.active_filter === "include_deleted") ? "含める" : "除外";
     badgesEl.innerHTML = [
       `<span class="badge">期間: ${escapeHtml(state.date_from)} → ${escapeHtml(state.date_to_ymd)}</span>`,
       `<span class="badge">完了: ${escapeHtml(doneLabel)}</span>`,
       `<span class="badge">種別: ${escapeHtml(typeLabel)}</span>`,
+      `<span class="badge">削除済み: ${escapeHtml(activeLabel)}</span>`,
       `<span class="badge">並び: ${escapeHtml(state.sort_order === "desc" ? "新しい順" : "近い順")}</span>`,
       `<span class="badge">検索: ${escapeHtml(kw ? state.keyword : "なし")}</span>`,
       `<span class="badge">表示: ${escapeHtml(String(countShown))}/${escapeHtml(String(countAll))}</span>`,
@@ -286,7 +302,10 @@ export async function renderVisitsList(appEl, query) {
 
   const rebuildTypeOptions_ = () => {
     if (!typeEl) return;
-    const types = collectVisitTypes_(visitsAll);
+    const base = (state.active_filter === "active_only")
+      ? visitsAll.filter(v => isActive_(v))
+      : visitsAll;
+    const types = collectVisitTypes_(base);
     const current = String(state.type_filter || "all");
     typeEl.innerHTML = [
       `<option value="all">すべて</option>`,
@@ -300,8 +319,12 @@ export async function renderVisitsList(appEl, query) {
 
   const applyAndRender_ = () => {
     const kw = normalizeKeyword_(state.keyword);
-    let filtered = (kw ? visitsAll.filter(v => keywordHit_(v, kw)) : visitsAll.slice());
+    let base = (state.active_filter === "active_only")
+      ? visitsAll.filter(v => isActive_(v))
+      : visitsAll.slice();
 
+    let filtered = (kw ? base.filter(v => keywordHit_(v, kw)) : base.slice());
+    
     // 完了状態フィルタ
     if (state.done_filter === "open_only") {
       filtered = filtered.filter(v => !isDone_(v));
@@ -328,7 +351,7 @@ export async function renderVisitsList(appEl, query) {
     const y = window.scrollY;
     listEl.innerHTML = sorted.map(cardHtml).join("");
     window.scrollTo(0, y);
-    updateStatusBadges_(sorted.length, visitsAll.length);
+    updateStatusBadges_(sorted.length, base.length);
   };
 
   const fetchAndRender_ = async () => {
@@ -403,14 +426,24 @@ export async function renderVisitsList(appEl, query) {
     state.keyword = kwEl.value || "";
     applyAndRender_();
   });
+
   doneEl?.addEventListener("change", () => {
     state.done_filter = doneEl.value || "open_first";
     applyAndRender_();
   });
+
   typeEl?.addEventListener("change", () => {
     state.type_filter = typeEl.value || "all";
     applyAndRender_();
   });
+
+  activeEl?.addEventListener("change", () => {
+    state.active_filter = activeEl.value || "active_only";
+    // 削除済み表示切替で「種別」候補も変わりうるため再構築
+    rebuildTypeOptions_();
+    applyAndRender_();
+  });
+  
   sortEl?.addEventListener("change", () => {
     state.sort_order = sortEl.value || "asc";
     applyAndRender_();
