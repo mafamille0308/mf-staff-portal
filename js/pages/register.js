@@ -2,7 +2,7 @@
 import { render, qs, toast, escapeHtml, showModal } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
 import { CONFIG } from "../config.js";
-import { getIdToken, getUser, setUser } from "../auth.js";
+import { getIdToken, getUser } from "../auth.js";
 
 const VISIT_TYPE_LABELS = {
   sitting: "シッティング",
@@ -165,6 +165,8 @@ async function fetchInterpreterToken_() {
   const r = await callGas({ action: "issueInterpreterToken" }, idToken);
   console.log("[register] issueInterpreterToken response received =", !!r, "hasRaw=", !!(r && r.raw));
 
+  try { unwrapResults(r); } catch (_) {}
+
   const raw = r && r.raw ? r.raw : r;
   console.log("[register] issueInterpreterToken parsed =", {
     ok: !!(raw && raw.ok),
@@ -176,8 +178,6 @@ async function fetchInterpreterToken_() {
   if (!raw || !raw.ok || !raw.token) {
     throw new Error(raw && raw.error ? raw.error : "token issuance failed");
   }
-
-  if (raw && raw.ctx) setUser(raw.ctx);
 
   return raw.token;
 }
@@ -494,6 +494,9 @@ export function renderRegisterTab(app) {
 
       <!-- 顧客候補 -->
       <div id="reg_customer_candidates" class="is-hidden" style="margin-bottom:20px;"></div>
+
+      <!-- 顧客確定（選択済みの表示） -->
+      <div id="reg_customer_selected" class="is-hidden" style="margin-bottom:20px;"></div>
 
       <!-- 警告エリア -->
       <div id="reg_warnings" class="is-hidden" style="margin-bottom:20px;"></div>
@@ -827,7 +830,8 @@ export function renderRegisterTab(app) {
     const seen = new Map(); // key -> [idx]
     visits.forEach((v, idx) => {
       const date = String(v.date || "").trim();
-      const st = String(v.start_time || "").trim();
+      const stRaw = String(v.start_time || "").trim();
+      const st = fmtHm_(stRaw);
       if (!date || !st) return;
       const key = `${date}__${st}`;
       const arr = seen.get(key) || [];
@@ -1314,7 +1318,7 @@ export function renderRegisterTab(app) {
       const msg = (e && e.message) ? e.message : String(e);
       toast({ message: msg });
       try { setBusy(false); } catch (e2) {}
-      
+
       // ApiError なら request_id を拾う（GAS RequestLogs 追跡用）
       const rid = (e && (e.request_id || (e.detail && e.detail.request_id))) ? (e.request_id || e.detail.request_id) : _lastCommitRequestId;
       const user = getUser() || {};

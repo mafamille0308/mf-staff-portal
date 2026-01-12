@@ -1,6 +1,6 @@
 // js/api.js
 import { CONFIG } from "./config.js";
-import { clearIdToken } from "./auth.js";
+import { setUser, clearIdToken } from "./auth.js";
 
 function newRequestId() {
   return "web_" + Date.now() + "_" + Math.random().toString(16).slice(2);
@@ -57,8 +57,6 @@ export async function callGas(payload, idToken) {
   try {
     if (json && typeof json === "object") {
       json._meta = { request_id: rid, http_status: resp.status };
-    } else if (Array.isArray(json)) {
-      json._meta = { request_id: rid, http_status: resp.status };
     }
   } catch (e) {}
 
@@ -92,6 +90,11 @@ export function unwrapResults(res) {
   if (Array.isArray(res)) return { results: res, ctx: null, raw: res };
   const results = (res && (res.results || res.visits || res.data)) || [];
   const ctx = (res && res.ctx) || null;
+
+  try {
+    if (ctx) setUser(ctx);
+  } catch (_) {}
+
   return { results, ctx, raw: res };
 }
 

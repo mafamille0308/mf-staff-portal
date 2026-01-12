@@ -6,9 +6,10 @@ let _idToken = "";
 let _user = null; // { email, role, staff_id, name? } をGASから返す想定に対応
 
 /**
- * id_token を sessionStorage に保存・復元
+ * id_token / ctx を sessionStorage に保存・復元
  */
 const KEY_ID_TOKEN = "mf_id_token";
+const KEY_USER = "mf_user_ctx";
 
 // JWT(exp)を読み、有効期限切れを判定する
 function _parseJwtPayload(idToken) {
@@ -59,11 +60,23 @@ export function getIdToken() {
 export function clearIdToken() {
   _idToken = "";
   sessionStorage.removeItem(KEY_ID_TOKEN);
+  _user = null;
+  sessionStorage.removeItem(KEY_USER);
   // ログイン状態変化を通知
   window.dispatchEvent(new CustomEvent("mf:auth:changed", { detail: { authed: false } }));
 }
 
-export function getUser() { return _user; }
+export function getUser() {
+  if (_user) return _user;
+  try {
+    const raw = sessionStorage.getItem(KEY_USER);
+    if (!raw) return null;
+    _user = JSON.parse(raw);
+    return _user;
+  } catch (e) {
+    return null;
+  }
+}
 
 export function isAuthed() {
   return !!getIdToken();
@@ -128,4 +141,9 @@ export function initGoogleLogin({ containerId = "app", onLogin } = {}) {
  */
 export function setUser(user) {
   _user = user || null;
+  try {
+    if (_user) sessionStorage.setItem(KEY_USER, JSON.stringify(_user));
+    else sessionStorage.removeItem(KEY_USER);
+  } catch (e) {
+  }
 }
