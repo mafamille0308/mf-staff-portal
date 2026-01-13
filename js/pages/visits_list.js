@@ -9,6 +9,9 @@ const KEY_VF_STATE = "mf:visits_list:state:v1";
 const KEY_VF_CACHE = "mf:visits_list:cache:v1";
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2分（体感改善目的）
 
+const KEY_VLIST_SCROLL_Y = "mf:visits_list:scroll_y:v1";
+const KEY_VLIST_SCROLL_RESTORE_ONCE = "mf:visits_list:scroll_restore_once:v1";
+
 function toYmd(d) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -300,6 +303,34 @@ export async function renderVisitsList(appEl, query) {
   // - 画面表示は keyword / sort をクライアント側で適用
   let visitsAll = [];
 
+  // ===== スクロール復元（詳細→一覧の体感改善）=====
+  // - applyAndRender_ は「再描画しても現在の位置を維持」する実装が既にあるため、ここでは
+  //   「一覧に戻ってきた直後（初回）だけ」保存値へ復元する。
+  const restoreScrollOnce_ = () => {
+    let y = 0;
+    try {
+      const raw = sessionStorage.getItem(KEY_VLIST_SCROLL_Y);
+      y = Number(raw || "0") || 0;
+    } catch (_) { y = 0; }
+    // 1回だけ実行（連続描画やフィルタ操作で勝手に戻らないようにする）
+    try { sessionStorage.removeItem(KEY_VLIST_SCROLL_RESTORE_ONCE); } catch (_) {}
+    if (y > 0) window.scrollTo(0, y);
+  };
+
+  const markRestoreOnce_ = () => {
+    try { sessionStorage.setItem(KEY_VLIST_SCROLL_RESTORE_ONCE, "1"); } catch (_) {}
+  };
+
+  const shouldRestoreOnce_ = () => {
+    try { return sessionStorage.getItem(KEY_VLIST_SCROLL_RESTORE_ONCE) === "1"; } catch (_) { return false; }
+  };
+
+  // renderVisitsList が呼ばれたタイミングで「復元フラグ」が立っていれば、描画後に復元する
+  // ※ DOM差し替え後に行う必要があるため、最後に setTimeout(0) で実行する
+  if (shouldRestoreOnce_()) {
+    setTimeout(() => restoreScrollOnce_(), 0);
+  }
+
   // ===== 開閉状態（スマホでの表示領域最適化）=====
   const KEY_VF_OPEN = "mf_vf_open";
   const applyDetailsUi_ = (isOpen) => {
@@ -559,6 +590,11 @@ export async function renderVisitsList(appEl, query) {
     const action = actEl.dataset.action;
 
     if (action === "open") {
+      // 詳細へ遷移する直前にスクロール位置を保存し、戻ったら復元する
+      try {
+        sessionStorage.setItem(KEY_VLIST_SCROLL_Y, String(window.scrollY || 0));
+        markRestoreOnce_();
+      } catch (_) {}
       location.hash = `#/visits?id=${encodeURIComponent(vid)}`;
       return;
     }

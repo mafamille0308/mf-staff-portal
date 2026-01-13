@@ -190,7 +190,8 @@ export async function renderVisitDetail(appEl, query) {
           <div class="card">
             <div class="p">
               <div><strong>${escapeHtml(fmt(p.name || p.pet_name || ""))}</strong></div>
-              <div>種別：${escapeHtml(fmt(p.type || p.pet_type || ""))}　品種：${escapeHtml(fmt(p.breed || ""))}</div>
+              <div>種類：${escapeHtml(fmt(p.type || p.pet_type || ""))}</div>
+              <div>品種：${escapeHtml(fmt(p.breed || ""))}</div>
               <div>年齢：${escapeHtml(fmt(p.age || ""))}</div>
               <div>メモ：${escapeHtml(fmt(p.notes || p.memo || ""))}</div>
             </div>
