@@ -4,6 +4,11 @@ import { callGas, unwrapResults } from "../api.js";
 import { getIdToken } from "../auth.js";
 import { toggleVisitDone } from "./visit_done_toggle.js";
 
+// ===== sessionStorage keys =====
+const KEY_VF_STATE = "mf:visits_list:state:v1";
+const KEY_VF_CACHE = "mf:visits_list:cache:v1";
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2分（体感改善目的）
+
 function toYmd(d) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -30,6 +35,36 @@ function isDone_(v) {
 
 function isActive_(v) {
   return !(v.is_active === false || String(v.is_active || "").toLowerCase() === "false");
+}
+
+function safeParseJson_(s) {
+  try { return JSON.parse(String(s || "")); } catch (_) { return null; }
+}
+
+function loadState_() {
+  const obj = safeParseJson_(sessionStorage.getItem(KEY_VF_STATE));
+  return (obj && typeof obj === "object") ? obj : null;
+}
+
+function saveState_(state) {
+  try { sessionStorage.setItem(KEY_VF_STATE, JSON.stringify(state)); } catch (_) {}
+}
+
+function cacheKey_(state) {
+  return `${String(state.date_from || "")}__${String(state.date_to_ymd || "")}`;
+}
+
+function loadCache_(key) {
+  const obj = safeParseJson_(sessionStorage.getItem(KEY_VF_CACHE));
+  if (!obj || typeof obj !== "object") return null;
+  if (obj.key !== key) return null;
+  if (!obj.ts || (Date.now() - Number(obj.ts)) > CACHE_TTL_MS) return null;
+  if (!Array.isArray(obj.visits)) return null;
+  return obj.visits;
+}
+
+function saveCache_(key, visits) {
+  try { sessionStorage.setItem(KEY_VF_CACHE, JSON.stringify({ key, ts: Date.now(), visits })); } catch (_) {}
 }
 
 function pickVisitType_(v) {
@@ -158,15 +193,17 @@ function cardHtml(v) {
 export async function renderVisitsList(appEl, query) {
   // ===== state =====
   const init = defaultRange();
+  const saved = (() => { try { return loadState_(); } catch (_) { return null; } })();
   let state = {
-    date_from: init.date_from,
-    date_to_ymd: init.date_to.slice(0, 10),
-    keyword: "",
-    sort_order: "asc", // 近い順（運用上、次の予定が見やすい）
-    done_filter: "open_first", // open_first | open_only | done_only | all
-    type_filter: "all", // all | <visit_type>
-    active_filter: "active_only", // active_only | include_deleted
-  };
+    date_from: (saved && saved.date_from) ? String(saved.date_from) : init.date_from,
+    date_to_ymd: (saved && saved.date_to_ymd) ? String(saved.date_to_ymd) : init.date_to.slice(0, 10),
+    keyword: (saved && typeof saved.keyword === "string") ? saved.keyword : "",
+    sort_order: (saved && saved.sort_order) ? String(saved.sort_order) : "asc", // 近い順（運用上、次の予定が見やすい）
+    done_filter: (saved && saved.done_filter) ? String(saved.done_filter) : "open_first", // open_first | open_only | done_only | all
+    type_filter: (saved && saved.type_filter) ? String(saved.type_filter) : "all", // all | <visit_type>
+    active_filter: (saved && saved.active_filter) ? String(saved.active_filter) : "active_only", // active_only | include_deleted
+   };
+  saveState_(state);
 
   render(appEl, `
     <section class="section">
@@ -343,7 +380,9 @@ export async function renderVisitsList(appEl, query) {
 
     if (!sorted.length) {
       listEl.innerHTML = `<p class="p">条件に一致する予約がありません。</p>`;
-      updateStatusBadges_(0, visitsAll.length);
+      // 表示母数は「削除済みフィルタ」適用後の base を優先
+      const baseCount = (state.active_filter === "active_only") ? base.length : visitsAll.length;
+      updateStatusBadges_(0, baseCount);
       return;
     }
 
@@ -354,13 +393,25 @@ export async function renderVisitsList(appEl, query) {
     updateStatusBadges_(sorted.length, base.length);
   };
 
-  const fetchAndRender_ = async () => {
+  const fetchAndRender_ = async ({ force = false } = {}) => {
     listEl.innerHTML = `<p class="p">読み込み中...</p>`;
 
     const idToken = getIdToken();
     if (!idToken) {
       listEl.innerHTML = `<p class="p">ログインしてください。</p>`;
       return;
+    }
+
+    // ===== cache（同一期間なら短時間は再取得しない）=====
+    const ck = cacheKey_(state);
+    if (!force) {
+      const cached = loadCache_(ck);
+      if (cached) {
+        visitsAll = cached;
+        rebuildTypeOptions_();
+        applyAndRender_();
+        return;
+      }
     }
 
     let res;
@@ -394,11 +445,12 @@ export async function renderVisitsList(appEl, query) {
     }
 
     visitsAll = visits;
+    saveCache_(cacheKey_(state), visitsAll);
     rebuildTypeOptions_();
     applyAndRender_();
   };
 
-  await fetchAndRender_();
+  await fetchAndRender_({ force: false });
 
   // ===== フィルタUI =====
   const resetToDefault_ = async () => {
@@ -411,29 +463,35 @@ export async function renderVisitsList(appEl, query) {
       sort_order: "asc",
       done_filter: "open_first",
       type_filter: "all",
+      active_filter: "active_only",
     };
     if (fromEl) fromEl.value = state.date_from;
     if (toEl) toEl.value = state.date_to_ymd;
     if (kwEl) kwEl.value = state.keyword;
     if (doneEl) doneEl.value = state.done_filter;
     if (typeEl) typeEl.value = state.type_filter;
+    if (activeEl) activeEl.value = state.active_filter;
     if (sortEl) sortEl.value = state.sort_order;
-    await fetchAndRender_();
+    saveState_(state);
+    await fetchAndRender_({ force: true });
   };
 
   // 入力（keyword / sort）は即時反映
   kwEl?.addEventListener("input", () => {
     state.keyword = kwEl.value || "";
+    saveState_(state);
     applyAndRender_();
   });
 
   doneEl?.addEventListener("change", () => {
     state.done_filter = doneEl.value || "open_first";
+    saveState_(state);
     applyAndRender_();
   });
 
   typeEl?.addEventListener("change", () => {
     state.type_filter = typeEl.value || "all";
+    saveState_(state);
     applyAndRender_();
   });
 
@@ -441,11 +499,13 @@ export async function renderVisitsList(appEl, query) {
     state.active_filter = activeEl.value || "active_only";
     // 削除済み表示切替で「種別」候補も変わりうるため再構築
     rebuildTypeOptions_();
+    saveState_(state);
     applyAndRender_();
   });
   
   sortEl?.addEventListener("change", () => {
     state.sort_order = sortEl.value || "asc";
+    saveState_(state);
     applyAndRender_();
   });
 
@@ -458,6 +518,7 @@ export async function renderVisitsList(appEl, query) {
     if (a === "clear-keyword") {
       if (kwEl) kwEl.value = "";
       state.keyword = "";
+      saveState_(state);
       applyAndRender_();
       return;
     }
@@ -480,7 +541,8 @@ export async function renderVisitsList(appEl, query) {
       }
       state.date_from = nextFrom;
       state.date_to_ymd = nextTo;
-      await fetchAndRender_();
+      saveState_(state);
+      await fetchAndRender_({ force: true });
       return;
     }
   });
@@ -541,9 +603,12 @@ export async function renderVisitsList(appEl, query) {
 
         // 重要：マージに失敗した場合は内部stateが更新できず、未完了優先ソートが崩れるため再取得
         if (m.idx < 0) {
-          await fetchAndRender_();
+          await fetchAndRender_({ force: true });
           return;
         }
+
+        // cache も更新（戻る/再表示で古い done 状態を見せない）
+        saveCache_(cacheKey_(state), visitsAll);
 
         // 並び替え・フィルタ条件を反映（未完了優先の入れ替えはここで発生する）
         applyAndRender_();

@@ -4,32 +4,8 @@ import { callGas, unwrapOne } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 import { toggleVisitDone } from "./visit_done_toggle.js";
 
-// function fmtDateTimeJst(v) {
-//   const s = fmt(v).trim();
-//   if (!s) return "";
-//   const d = new Date(s);
-//   if (isNaN(d.getTime())) return s; // パースできない場合は原文
-//   try {
-//     return new Intl.DateTimeFormat("ja-JP", {
-//       timeZone: "Asia/Tokyo",
-//       year: "numeric",
-//       month: "2-digit",
-//       day: "2-digit",
-//       hour: "2-digit",
-//       minute: "2-digit",
-//       hour12: false,
-//     }).format(d).replaceAll("-", "/");
-//   } catch {
-//     // Intl が使えない環境向けフォールバック（通常は不要）
-//     const pad = (n) => String(n).padStart(2, "0");
-//     return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-//   }
-// }
-
-// function displayOrDash(v) {
-//   const s = fmt(v).trim();
-//   return s ? s : "—";
-// }
+const KEY_VD_CACHE_PREFIX = "mf:visit_detail:cache:v1:";
+const VD_CACHE_TTL_MS = 2 * 60 * 1000; // 2分（体感改善）
 
 function section(title, bodyHtml) {
   return `
@@ -50,12 +26,21 @@ export async function renderVisitDetail(appEl, query) {
     <section class="section">
       <div class="row" style="justify-content:space-between; align-items:center;">
         <h1 class="h1">予約詳細</h1>
-        <a class="btn btn-ghost" href="#/visits">一覧に戻る</a>
+        <a class="btn btn-ghost" href="#/visits" id="btnBackToList">一覧に戻る</a>
       </div>
       <div class="hr"></div>
       <div id="visitDetailHost"><p class="p">読み込み中...</p></div>
     </section>
   `);
+
+  const backBtn = appEl.querySelector("#btnBackToList");
+  backBtn?.addEventListener("click", (e) => {
+    // 履歴があれば back を優先（一覧のスクロール/体感が良い）
+    if (window.history && window.history.length > 1) {
+      e.preventDefault();
+      window.history.back();
+    }
+  });
 
   const host = appEl.querySelector("#visitDetailHost");
   if (!host) return;
@@ -66,12 +51,26 @@ export async function renderVisitDetail(appEl, query) {
     return;
   }
 
+  // ===== cache（任意：直近に開いた詳細は即表示）=====
+  const cacheKey = KEY_VD_CACHE_PREFIX + String(visitId);
+  try {
+    const raw = sessionStorage.getItem(cacheKey);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && obj.ts && (Date.now() - Number(obj.ts)) <= VD_CACHE_TTL_MS && obj.visit) {
+        // キャッシュがあれば先に描画（後で最新取得に置き換える）
+        host.innerHTML = `<p class="p">読み込み中...</p>`;
+      }
+    }
+  } catch (_) {}
+
   let res;
   try {
+    // まず「予約情報のみ」を先に出す（体感優先）
     res = await callGas({
       action: "getVisitDetail",
       visit_id: visitId,
-      include_customer_detail: true,
+      include_customer_detail: false,
     }, idToken);
   } catch (err) {
     const msg = err?.message || String(err || "");
@@ -90,7 +89,6 @@ export async function renderVisitDetail(appEl, query) {
   if (res.ctx) setUser(res.ctx);
 
   const visit = unwrapOne(res);
-  const customerDetail = res.customer_detail || res.customerDetail || null;
 
   if (!visit) {
     host.innerHTML = `<p class="p">対象の予約が見つかりません。</p>`;
@@ -150,13 +148,32 @@ export async function renderVisitDetail(appEl, query) {
     </div>
   `;
 
-  let customerHtml = `<p class="p">（顧客詳細は未取得）</p>`;
-  if (customerDetail && customerDetail.customer) {
-    const c = customerDetail.customer;
-    const pets = Array.isArray(customerDetail.pets) ? customerDetail.pets : [];
-    const cp = customerDetail.careProfile || customerDetail.care_profile || null;
+  // 顧客詳細は後段で差し替える（先に “未取得” を出す）
+  const customerHtml = `<p class="p" id="customerDetailLoading">顧客詳細を読み込み中...</p>`;
 
-    customerHtml = `
+  host.innerHTML = `
+    ${section("予約情報", visitHtml)}
+    ${section("顧客・ペット・お世話情報", customerHtml)}
+  `;
+
+  // ===== 後段で顧客詳細を取得して差し替え =====
+  try {
+    const res2 = await callGas({
+      action: "getVisitDetail",
+      visit_id: visitId,
+      include_customer_detail: true,
+    }, idToken);
+    if (res2 && res2.ctx) setUser(res2.ctx);
+    if (!res2 || res2.success === false) throw new Error((res2 && (res2.error || res2.message)) || "getVisitDetail failed");
+
+    const customerDetail = res2.customer_detail || res2.customerDetail || null;
+    let html2 = `<p class="p">（顧客詳細は未取得）</p>`;
+    if (customerDetail && customerDetail.customer) {
+      const c = customerDetail.customer;
+      const pets = Array.isArray(customerDetail.pets) ? customerDetail.pets : [];
+      const cp = customerDetail.careProfile || customerDetail.care_profile || null;
+
+      html2 = `
       <div class="card">
         <div class="p">
           <div><strong>顧客名</strong>：${escapeHtml(fmt(c.name || ""))}</div>
@@ -191,12 +208,20 @@ export async function renderVisitDetail(appEl, query) {
         </div>
       ` : `<p class="p">お世話情報がありません。</p>`}
     `;
-  }
+    }
+    // 差し替え（該当セクションのみ）
+    const sec = host.querySelector("#customerDetailLoading");
+    if (sec) sec.outerHTML = html2;
 
-  host.innerHTML = `
-    ${section("予約情報", visitHtml)}
-    ${section("顧客・ペット・お世話情報", customerHtml)}
-  `;
+    // cache 保存（任意）
+    try {
+      sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), visit: visit, customer_detail: customerDetail }));
+    } catch (_) {}
+  } catch (e) {
+    // 顧客詳細が落ちても予約情報は見せる（体感優先）
+    const sec = host.querySelector("#customerDetailLoading");
+    if (sec) sec.outerHTML = `<p class="p">顧客詳細の取得に失敗しました。</p>`;
+  }
 
   // ===== done 切替（バッジタップ）=====
   host.addEventListener("click", async (e) => {
