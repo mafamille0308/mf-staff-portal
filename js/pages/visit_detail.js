@@ -34,6 +34,22 @@ function lineBlock_(label, text) {
   `;
 }
 
+function rawToggle_(rawText) {
+  const s = normStr_(rawText);
+  if (!s) return "";
+  return `
+    <div class="hr"></div>
+    <details class="details">
+      <summary class="p" style="cursor:pointer; user-select:none;">
+        <strong>カルテ原本（OCR）</strong>（タップで表示）
+      </summary>
+      <div class="card" style="margin-top:8px;">
+        <div class="p" style="white-space:pre-wrap;">${escapeHtml(s)}</div>
+      </div>
+    </details>
+  `;
+}
+
 function renderCareProfile_(cp) {
   if (!cp || typeof cp !== "object") return `<p class="p">お世話情報がありません。</p>`;
 
@@ -59,8 +75,7 @@ function renderCareProfile_(cp) {
     ${lineBlock_("散歩", walk)}
     ${lineBlock_("遊び", play)}
     ${lineBlock_("その他", other)}
-    ${lineBlock_("内容（要約）", content)}
-    ${lineBlock_("内容原本（OCR）", raw)}
+    ${rawToggle_(raw)}
   `;
 }
 
