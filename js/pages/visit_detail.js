@@ -7,6 +7,63 @@ import { toggleVisitDone } from "./visit_done_toggle.js";
 const KEY_VD_CACHE_PREFIX = "mf:visit_detail:cache:v1:";
 const VD_CACHE_TTL_MS = 2 * 60 * 1000; // 2分（体感改善）
 
+function normStr_(v) {
+  const s = fmt(v);
+  return (s == null) ? "" : String(s).trim();
+}
+
+function pickFirst_(obj, keys) {
+  if (!obj) return "";
+  for (const k of keys) {
+    const v = obj[k];
+    const s = normStr_(v);
+    if (s) return s;
+  }
+  return "";
+}
+
+function lineBlock_(label, text) {
+  const s = normStr_(text);
+  if (!s) return "";
+  return `
+    <div class="hr"></div>
+    <div class="p"><strong>${escapeHtml(label)}</strong></div>
+    <div class="card">
+      <div class="p" style="white-space:pre-wrap;">${escapeHtml(s)}</div>
+    </div>
+  `;
+}
+
+function renderCareProfile_(cp) {
+  if (!cp || typeof cp !== "object") return `<p class="p">お世話情報がありません。</p>`;
+
+  // 互換吸収（段階移行を許容）
+  const warnings = pickFirst_(cp, ["warnings", "注意事項"]);
+  const raw      = pickFirst_(cp, ["content_raw", "内容原本"]);
+  const content  = pickFirst_(cp, ["content", "内容"]);
+  const food     = pickFirst_(cp, ["food_care", "ごはん", "ごはんのお世話"]);
+  const toilet   = pickFirst_(cp, ["toilet_care", "トイレ", "トイレのお世話"]);
+  const walk     = pickFirst_(cp, ["walk_care", "散歩", "散歩のお世話"]);
+  const play     = pickFirst_(cp, ["play_care", "遊び", "遊び・お散歩のお世話"]);
+  const other    = pickFirst_(cp, ["other_care", "その他", "室内環境・その他", "environment_other"]);
+
+  // どれも無い場合は、旧データの content だけでも表示
+  const any =
+    warnings || raw || content || food || toilet || walk || play || other;
+  if (!any) return `<p class="p">お世話情報がありません。</p>`;
+
+  return `
+    ${lineBlock_("注意事項", warnings)}
+    ${lineBlock_("ごはん", food)}
+    ${lineBlock_("トイレ", toilet)}
+    ${lineBlock_("散歩", walk)}
+    ${lineBlock_("遊び", play)}
+    ${lineBlock_("その他", other)}
+    ${lineBlock_("内容（要約）", content)}
+    ${lineBlock_("内容原本（OCR）", raw)}
+  `;
+}
+
 function section(title, bodyHtml) {
   return `
     <div class="hr"></div>
@@ -190,10 +247,12 @@ export async function renderVisitDetail(appEl, query) {
           <div class="card">
             <div class="p">
               <div><strong>${escapeHtml(fmt(p.name || p.pet_name || ""))}</strong></div>
-              <div>種類：${escapeHtml(fmt(p.type || p.pet_type || ""))}</div>
+              <div>種類：${escapeHtml(fmt(p.species || p.type || p.pet_type || ""))}</div>
               <div>品種：${escapeHtml(fmt(p.breed || ""))}</div>
               <div>年齢：${escapeHtml(fmt(p.age || ""))}</div>
               <div>メモ：${escapeHtml(fmt(p.notes || p.memo || ""))}</div>
+              <div>病院：${escapeHtml(displayOrDash(fmt(p.hospital || "")))}</div>
+              <div>病院電話：${escapeHtml(displayOrDash(fmt(p.hospital_phone || "")))}</div>
             </div>
           </div>
         `).join("")}
@@ -202,11 +261,7 @@ export async function renderVisitDetail(appEl, query) {
       ${cp ? `
         <div class="hr"></div>
         <div class="p"><strong>お世話情報</strong></div>
-        <div class="card">
-          <div class="p">
-            <pre class="pre" style="white-space:pre-wrap;">${escapeHtml(JSON.stringify(cp, null, 2))}</pre>
-          </div>
-        </div>
+        ${renderCareProfile_(cp)}
       ` : `<p class="p">お世話情報がありません。</p>`}
     `;
     }
