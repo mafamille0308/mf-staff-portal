@@ -4,7 +4,8 @@ import { initGoogleLogin, isAuthed, getUser } from "./auth.js";
 
 import { renderVisitsList } from "./pages/visits_list.js";
 import { renderVisitDetail } from "./pages/visit_detail.js";
-import { renderCustomersPlaceholder } from "./pages/customers_list.js";
+import { renderCustomersList } from "./pages/customers_list.js";
+import { renderCustomerDetail } from "./pages/customer_detail.js";
 import { renderSummaryPlaceholder } from "./pages/summary.js";
 import { renderRegisterTab } from "./pages/register.js";
 
@@ -70,7 +71,12 @@ async function route() {
         await renderVisitsList(app, query);
       }
     } else if (path === "/customers") {
-      renderCustomersPlaceholder(app);
+      const cid = query.get("id");
+      if (cid) {
+        await renderCustomerDetail(app, query);
+      } else {
+        await renderCustomersList(app, query);
+      }
     } else if (path === "/summary") {
       renderSummaryPlaceholder(app);
     } else if (path === "/register") {
