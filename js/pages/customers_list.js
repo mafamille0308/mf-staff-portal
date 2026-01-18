@@ -41,10 +41,8 @@ function card_(c) {
         <div>${escapeHtml(fmt(c.address || "—"))}</div>
         <div>電話：${escapeHtml(fmt(c.phone || "—"))}</div>
       </div>
-      <div class="badges">
-        <span class="badge badge-pet-name">
-          ${renderPetsBadges_(c.pet_names)}
-        </span>
+      <div class="pets-badges">
+        ${renderPetsBadges_(c.pet_names)}
       </div>
       <div class="row row-between">
         <button class="btn" type="button" data-act="open" data-cid="${escapeHtml(cid)}">顧客詳細</button>
