@@ -37,10 +37,14 @@ function card_(c) {
           <span class="badge">${escapeHtml(cid)}</span>
         </div>
       </div>
-      <div class="card-sub">${escapeHtml(fmt(c.address || "—"))}</div>
-      <div class="card-meta">
-        <div class="p text-sm">電話：${escapeHtml(fmt(c.phone || "—"))}</div>
-        ${renderPetsBadges_(c.pet_names)}
+      <div class="card-sub">
+        <div>${escapeHtml(fmt(c.address || "—"))}</div>
+        <div>電話：${escapeHtml(fmt(c.phone || "—"))}</div>
+      </div>
+      <div class="badges">
+        <span class="badge badge-pet-name">
+          ${renderPetsBadges_(c.pet_names)}
+        </span>
       </div>
       <div class="row row-between">
         <button class="btn" type="button" data-act="open" data-cid="${escapeHtml(cid)}">顧客詳細</button>

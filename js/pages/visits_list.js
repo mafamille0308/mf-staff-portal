@@ -165,25 +165,26 @@ function cardHtml(v) {
   return `
     <div class="card" data-visit-id="${escapeHtml(vid)}" data-done="${done ? "1" : "0"}">
       <div class="card-title">
-      <div>${escapeHtml(displayOrDash(start))}</div>
-      <div>${escapeHtml(displayOrDash(vid))}</div>
+        <div>${escapeHtml(displayOrDash(start))}</div>
+        <div>${escapeHtml(displayOrDash(vid))}</div>
       </div>
       <div class="card-sub">
-      <div><strong>${escapeHtml(displayOrDash(customer))}</strong></div>
-      <div>${escapeHtml(displayOrDash(title))}</div>
+        <div><strong>${escapeHtml(displayOrDash(customer))}</strong></div>
+        <div>${escapeHtml(displayOrDash(title))}</div>
       </div>
       <div class="badges" data-role="badges">
-      <span class="badge badge-visit-type">
-        ${escapeHtml(displayOrDash(fmt(visitType), "訪問種別未設定"))}
-      </span>
-      <span class="badge badge-billing-status">
-        ${escapeHtml(displayOrDash(fmt(billingStatus), "請求未確定"))}
+        <span class="badge badge-visit-type">
+          ${escapeHtml(displayOrDash(fmt(visitType), "訪問種別未設定"))}
         </span>
-        <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}"
-          data-action="toggle-done"
-          style="cursor:pointer;"
-          title="タップで完了/未完了を切り替え"
-        >${done ? "完了" : "未完了"}</span>
+        <span class="badge badge-billing-status">
+          ${escapeHtml(displayOrDash(fmt(billingStatus), "請求未確定"))}
+        </span>
+          <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}"
+            data-action="toggle-done"
+            style="cursor:pointer;"
+            title="タップで完了/未完了を切り替え"
+          >${done ? "完了" : "未完了"}
+        </span>
         <span class="badge badge-active ${isActive ? "is-active" : "badge-danger is-inactive"}">${isActive ? "有効" : "削除済"}</span>
       </div>
       <div class="row" style="justify-content:flex-end; margin-top:10px;">
