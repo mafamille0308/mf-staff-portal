@@ -68,7 +68,7 @@ function renderPetsBadges_(petNames) {
   return `<div class="badges">${pets.map(n => `<span class="badge">${escapeHtml(fmt(n))}</span>`).join("")}</div>`;
 }
 
-function card_(c) {
+function cardHtml(c) {
   const cid = String(c.customer_id || "").trim();
   return `
     <div class="card" data-customer-id="${escapeHtml(cid)}">
