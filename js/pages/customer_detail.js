@@ -1,6 +1,6 @@
 // js/pages/customer_detail.js
 import { render, escapeHtml, toast, fmt } from "../ui.js";
-import { callGas } from "../api.js";
+import { callGas, unwrapOne } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 
 const KEY_CD_CACHE_PREFIX = "mf:customer_detail:cache:v1:";
@@ -21,24 +21,23 @@ function pickFirst_(obj, keys) {
   return "";
 }
 
-function extractCustomerDetail_(res) {
-  if (!res) return null;
+function extractCustomerDetail_(payload) {
+  if (!payload) return null;
 
-  // 代表的な形状を広く吸収
+  // 代表的な形状を広く吸収（payload は unwrapOne(res) の戻り）
   // - { customer_detail: {...} }
-  // - { result: {...} }
-  // - { results: [ {...} ] }  ※ list系の名残
-  // - { customer: {...}, pets:[...] }  ※ 直置き
+  // - { customerDetail: {...} }
+  // - { customer: {...}, pets:[...] } 直置き
+  // - { result: {...} } 互換
   const d =
-    res.customer_detail ||
-    res.customerDetail ||
-    res.result ||
-    (Array.isArray(res.results) ? res.results[0] : null) ||
+    payload.customer_detail ||
+    payload.customerDetail ||
+    payload.result ||
+    payload ||
     null;
 
   if (!d) return null;
 
-  // customer は d.customer 優先、なければ d 自体
   const customer = d.customer || d.Customer || d;
   const pets = Array.isArray(d.pets) ? d.pets : (Array.isArray(d.Pets) ? d.Pets : []);
   const careProfile = d.careProfile || d.care_profile || d.care || null;
@@ -64,7 +63,7 @@ export async function renderCustomerDetail(appEl, query) {
     </section>
   `);
 
-  // visits と同様：履歴があれば back 優先
+  // 履歴があれば back 優先
   const backBtn = appEl.querySelector("#btnBackCustomers");
   backBtn?.addEventListener("click", (e) => {
     if (window.history && window.history.length > 1) {
@@ -80,34 +79,42 @@ export async function renderCustomerDetail(appEl, query) {
     return;
   }
 
-  // ===== cache（任意：直近に開いた詳細は即表示）=====
+  // ===== cache（直近に開いた詳細は即表示）=====
   const cacheKey = KEY_CD_CACHE_PREFIX + String(customerId);
-  try {
-    const raw = sessionStorage.getItem(cacheKey);
-    if (raw) {
-      const obj = JSON.parse(raw);
-      if (obj && obj.ts && (Date.now() - Number(obj.ts)) <= CD_CACHE_TTL_MS && obj.detail) {
-        // ここでは “先に即表示” しても良いが、まずは読み込み中のままでもOK
-        // host.innerHTML = obj.html || `<p class="p">読み込み中...</p>`;
-      }
-    }
-  } catch (_) {}
 
   try {
+    // cache があれば先に利用（任意：体感改善）
+    try {
+      const raw = sessionStorage.getItem(cacheKey);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj && obj.ts && (Date.now() - Number(obj.ts)) <= CD_CACHE_TTL_MS && obj.detail) {
+          // ここで即表示したい場合は obj.detail を使って描画しても良い（現状は未使用でOK）
+        }
+      }
+    } catch (_) {}
+
     const res = await callGas({
       action: "getCustomerDetail",
       customer_id: customerId,
-      // GASが未対応でも無視される想定（互換目的）
       include_pets: true,
       include_care_profile: true,
     }, idToken);
-    if (!res || res.success === false) throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
+
+    if (!res || res.success === false) {
+      throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
+    }
 
     if (res.ctx) setUser(res.ctx);
-    const detail = extractCustomerDetail_(res);
-    if (!detail || !detail.customer) throw new Error("顧客詳細が空です（レスポンス形状を確認してください）。");
 
-    // いったん最小表示（後で care 編集導線へ拡張）
+    // visits_detail と同様に unwrap して “本体” を取る
+    const payload = unwrapOne(res);
+    const detail = extractCustomerDetail_(payload);
+
+    if (!detail || !detail.customer) {
+      throw new Error("顧客詳細が空です（レスポンス形状を確認してください）。");
+    }
+
     const c = detail.customer;
     const pets = Array.isArray(detail.pets) ? detail.pets : [];
 
@@ -144,7 +151,6 @@ export async function renderCustomerDetail(appEl, query) {
     } catch (_) {}
   } catch (e) {
     toast({ title: "取得失敗", message: e?.message || String(e) });
-    // 切り分けを早くするため、最低限の情報だけ表示
     host.innerHTML = `
       <p class="p">取得に失敗しました。</p>
       <div class="hr"></div>
