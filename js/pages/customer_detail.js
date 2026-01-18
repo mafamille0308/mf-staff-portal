@@ -196,31 +196,31 @@ export async function renderCustomerDetail(appEl, query) {
       <div class="card">
         <div class="p">
           <div><strong>顧客ID</strong>：${escapeHtml(displayOrDash(c.id || c.customer_id || customerId))}</div>
-          <div><strong>顧客名</strong>：${escapeHtml(displayOrDash(c.name))}</div>
-          <div><strong>姓</strong>：${escapeHtml(displayOrDash(c.surname))}</div>
-          <div><strong>名</strong>：${escapeHtml(displayOrDash(c.given))}</div>
-          <div><strong>姓（かな）</strong>：${escapeHtml(displayOrDash(c.surname_kana || c.surnameKana))}</div>
-          <div><strong>名（かな）</strong>：${escapeHtml(displayOrDash(c.given_kana || c.givenKana))}</div>
+          <div><strong>顧客名</strong>：${
+            escapeHtml(displayOrDash(c.name))
+          }${
+            (() => {
+              const sk = (c.surname_kana || c.surnameKana || "").trim();
+              const gk = (c.given_kana || c.givenKana || "").trim();
+              const kk = (sk + gk).trim();
+              return kk ? ` <span style="opacity:.75;">(${escapeHtml(kk)})</span>` : "";
+            })()
+          }</div>
           <div><strong>電話</strong>：${escapeHtml(displayOrDash(c.phone))}</div>
           <div><strong>緊急連絡先</strong>：${escapeHtml(displayOrDash(c.emergency_phone || c.emergencyPhone))}</div>
           <div><strong>メール</strong>：${escapeHtml(displayOrDash(c.email))}</div>
           <div><strong>請求先メール</strong>：${escapeHtml(displayOrDash(c.billing_email || c.billingEmail))}</div>
+          <div><strong>郵便番号</strong>：${escapeHtml(displayOrDash(c.postal_code || (c.address_parts && c.address_parts.postal_code)))}</div>
           <div><strong>住所</strong>：${escapeHtml(displayOrDash(c.address_full || c.addressFull || c.address))}</div>
-         <div><strong>郵便番号</strong>：${escapeHtml(displayOrDash(c.postal_code || (c.address_parts && c.address_parts.postal_code)))}</div>
-          <div><strong>都道府県</strong>：${escapeHtml(displayOrDash(c.prefecture || (c.address_parts && c.address_parts.prefecture)))}</div>
-          <div><strong>市区町村</strong>：${escapeHtml(displayOrDash(c.city || (c.address_parts && c.address_parts.city)))}</div>
-          <div><strong>住所1</strong>：${escapeHtml(displayOrDash(c.address_line1 || (c.address_parts && c.address_parts.address_line1)))}</div>
-          <div><strong>住所2</strong>：${escapeHtml(displayOrDash(c.address_line2 || (c.address_parts && c.address_parts.address_line2)))}</div>
-          <div><strong>駐車</strong>：${escapeHtml(displayOrDash(c.parking_info || c.parkingInfo))}</div>
-          <div><strong>登録日</strong>：${escapeHtml(displayOrDash(c.registered_date || c.registeredDate))}</div>
+          <div><strong>駐車場</strong>：${escapeHtml(displayOrDash(c.parking_info || c.parkingInfo))}</div>
           <div><strong>鍵受取ルール</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule || c.keyPickupRule))}</div>
           <div><strong>鍵返却ルール</strong>：${escapeHtml(displayOrDash(c.key_return_rule || c.keyReturnRule))}</div>
-          <div><strong>鍵の場所</strong>：${escapeHtml(displayOrDash(c.key_location || c.keyLocation))}</div>
+          <div><strong>鍵の所在</strong>：${escapeHtml(displayOrDash(c.key_location || c.keyLocation))}</div>
           <div><strong>ロック番号</strong>：${escapeHtml(displayOrDash(c.lock_no || c.lockNo))}</div>
           <div><strong>メモ</strong>：${escapeHtml(displayOrDash(c.notes))}</div>
           <div><strong>ステージ</strong>：${escapeHtml(displayOrDash(c.stage))}</div>
+          <div><strong>登録日</strong>：${escapeHtml(displayOrDash(c.registered_date || c.registeredDate))}</div>
           <div><strong>更新日時</strong>：${escapeHtml(displayOrDash(c.updated_at || c.updatedAt))}</div>
-          <div><strong>有効</strong>：${escapeHtml((c.is_active === false) ? "false" : "true")}</div>
         </div>
       </div>
     `;
@@ -253,7 +253,7 @@ export async function renderCustomerDetail(appEl, query) {
 
     // ===== お世話情報 =====
     const careHtml = cp
-      ? `<div class="p"><strong>お世話情報</strong></div>${renderCareProfile_(cp)}`
+      ? `${renderCareProfile_(cp)}`
       : `<p class="p">お世話情報がありません。</p>`;
 
     host.innerHTML = `
