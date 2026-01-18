@@ -28,12 +28,15 @@ function extractCustomerDetail_(payload) {
   // - { customer_detail: {...} }
   // - { customerDetail: {...} }
   // - { customer: {...}, pets:[...] } 直置き
+  // - { results: {...} }  単一オブジェクト
   // - { result: {...} } 互換
   const d =
-    payload.customer_detail ||
-    payload.customerDetail ||
-    payload.result ||
-    payload ||
+    res.customer_detail ||
+    res.customerDetail ||
+    res.result ||
+    (res.results && typeof res.results === "object"
+      ? (Array.isArray(res.results) ? (res.results[0] || null) : res.results)
+      : null) ||
     null;
 
   if (!d) return null;
