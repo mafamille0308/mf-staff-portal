@@ -141,10 +141,9 @@ export async function renderCustomersList(appEl, query) {
     if (!cid) return;
 
     if (act === "open") {
+      const cid = el.dataset.cid || "";
+      if (!cid) return;
       location.hash = `#/customers?id=${encodeURIComponent(cid)}`;
-    } else if (act === "care") {
-      // 次段：care 編集導線ができたら、ここを専用ルートにしても良い
-      location.hash = `#/customers?id=${encodeURIComponent(cid)}&tab=care`;
     }
   });
 
