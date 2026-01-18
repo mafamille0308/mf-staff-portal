@@ -103,15 +103,19 @@ export async function renderCustomerDetail(appEl, query) {
     if (!res || res.success === false) {
       throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
     }
-
     if (res.ctx) setUser(res.ctx);
 
-    // visits_detail と同様に unwrap して “本体” を取る
-    const payload = unwrapOne(res);
-    const detail = extractCustomerDetail_(payload);
+    // getCustomerDetail は「直置き」返却を最優先で読む
+    // 互換：results/result/customer_detail などが来ても吸収
+    const detail =
+      (res.customer || res.pets || res.careProfile || res.care_profile)
+        ? { customer: res.customer || null, pets: Array.isArray(res.pets) ? res.pets : [], careProfile: res.careProfile || res.care_profile || null }
+        : extractCustomerDetail_(unwrapOne ? unwrapOne(res) : res); // unwrapOne が存在する前提ならOK
 
     if (!detail || !detail.customer) {
-      throw new Error("顧客詳細が空です（レスポンス形状を確認してください）。");
+      // 切り分け用：どのキーが存在するかをメッセージに含める
+      const keys = res ? Object.keys(res).slice(0, 50).join(", ") : "(no res)";
+      throw new Error(`顧客詳細が空です。res keys=[${keys}]`);
     }
 
     const c = detail.customer;
@@ -149,6 +153,7 @@ export async function renderCustomerDetail(appEl, query) {
       sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), detail }));
     } catch (_) {}
   } catch (e) {
+    const msg = e?.message || String(e);
     toast({ title: "取得失敗", message: e?.message || String(e) });
     host.innerHTML = `
       <p class="p">取得に失敗しました。</p>
