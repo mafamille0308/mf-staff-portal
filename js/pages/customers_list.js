@@ -44,9 +44,8 @@ function card_(c) {
       <div class="pets-badges">
         ${renderPetsBadges_(c.pet_names)}
       </div>
-      <div class="row row-between">
+      <div class="row" style="justify-content:flex-end; margin-top:10px;">
         <button class="btn" type="button" data-act="open" data-cid="${escapeHtml(cid)}">顧客詳細</button>
-        <button class="btn btn-ghost" type="button" data-act="care" data-cid="${escapeHtml(cid)}">お世話情報</button>
       </div>
     </div>
   `;
