@@ -21,31 +21,27 @@ function pickFirst_(obj, keys) {
   return "";
 }
 
-function extractCustomerDetail_(payload) {
-  if (!payload) return null;
+function extractCustomerDetail_(obj) {
+  if (!obj) return null;
 
-  // 代表的な形状を広く吸収（payload は unwrapOne(res) の戻り）
-  // - { customer_detail: {...} }
-  // - { customerDetail: {...} }
-  // - { customer: {...}, pets:[...] } 直置き
-  // - { results: {...} }  単一オブジェクト
-  // - { result: {...} } 互換
-  const d =
-    res.customer_detail ||
-    res.customerDetail ||
-    res.result ||
-    (res.results && typeof res.results === "object"
-      ? (Array.isArray(res.results) ? (res.results[0] || null) : res.results)
-      : null) ||
-    null;
+  // 1) まず「本体が直置き」パターン（getCustomerDetail の想定）
+  if (obj.customer || obj.pets || obj.careProfile || obj.care_profile) {
+    return {
+      customer: obj.customer || null,
+      pets: Array.isArray(obj.pets) ? obj.pets : [],
+      careProfile: obj.careProfile || obj.care_profile || null,
+    };
+  }
 
+  // 2) 次に「customer_detail の箱」パターン（他API互換）
+  const d = obj.customer_detail || obj.customerDetail || obj.result || null;
   if (!d) return null;
 
-  const customer = d.customer || d.Customer || d;
-  const pets = Array.isArray(d.pets) ? d.pets : (Array.isArray(d.Pets) ? d.Pets : []);
-  const careProfile = d.careProfile || d.care_profile || d.care || null;
-
-  return { customer, pets, careProfile };
+  return {
+    customer: d.customer || null,
+    pets: Array.isArray(d.pets) ? d.pets : [],
+    careProfile: d.careProfile || d.care_profile || null,
+  };
 }
 
 export async function renderCustomerDetail(appEl, query) {
@@ -159,6 +155,11 @@ export async function renderCustomerDetail(appEl, query) {
       <div class="hr"></div>
       <div class="p text-sm">customer_id=${escapeHtml(customerId)}</div>
       <div class="p text-sm">action=getCustomerDetail</div>
+      <div class="hr"></div>
+      <details class="details">
+      <summary class="p" style="cursor:pointer;">debug（エラー内容）</summary>
+      <div class="card"><div class="p" style="white-space:pre-wrap;">${escapeHtml(msg)}</div></div>
+      </details>
     `;
   }
 }
