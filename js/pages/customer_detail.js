@@ -243,7 +243,6 @@ export async function renderCustomerDetail(appEl, query) {
               <div><strong>メモ</strong>：${escapeHtml(displayOrDash(p.notes || p.memo))}</div>
               <div><strong>病院</strong>：${escapeHtml(displayOrDash(p.hospital))}</div>
               <div><strong>病院電話</strong>：${escapeHtml(displayOrDash(p.hospital_phone))}</div>
-              <div><strong>写真URL</strong>：${escapeHtml(displayOrDash(p.photo_url))}</div>
               <div><strong>登録日</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.registered_date)))}</div>
               <div><strong>更新日時</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(p.updated_at)))}</div>
             </div>
