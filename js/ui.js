@@ -119,3 +119,67 @@ export function fmtDateJst(v) {
     pad(d.getDate())
   );
 }
+
+// birthdate から年齢表示を生成（JST基準）
+// 返り値例: "3歳(2ヶ月)" / "3歳" / ""（birthdate無効）
+export function fmtAgeFromBirthdateJst(birthdate, now = new Date()) {
+  const bd = toValidDate_(birthdate);
+  if (!bd) return "";
+
+  // JSTの「日付」比較に寄せる（時刻でズレないように）
+  const today = new Date(now);
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const d = today.getDate();
+  const today0 = new Date(y, m, d, 0, 0, 0, 0);
+
+  const by = bd.getFullYear();
+  const bm = bd.getMonth();
+  const bdDay = bd.getDate();
+  const bd0 = new Date(by, bm, bdDay, 0, 0, 0, 0);
+
+  // 未来日・同日などのガード
+  if (bd0 > today0) return "";
+
+  let years = y - by;
+  // 今年の誕生日がまだ来ていないなら -1
+  const hasHadBirthdayThisYear =
+    (m > bm) || (m === bm && d >= bdDay);
+  if (!hasHadBirthdayThisYear) years -= 1;
+  if (years < 0) years = 0;
+
+  // 月齢（年を除いた残り月）
+  // まず「最終誕生日（年齢years到達日）」を作り、そこから today までの月差を出す
+  const lastBirthdayYear = by + years;
+  const lastBirthday = new Date(lastBirthdayYear, bm, bdDay, 0, 0, 0, 0);
+
+  let months = (y - lastBirthday.getFullYear()) * 12 + (m - lastBirthday.getMonth());
+  if (d < bdDay) months -= 1;
+  if (months < 0) months = 0;
+  // 0-11に丸める（理屈上は超えにくいが保険）
+  months = months % 12;
+
+  // 表示形式
+  if (years === 0 && months === 0) return "0歳";
+  if (months === 0) return `${years}歳`;
+  return `${years}歳(${months}ヶ月)`;
+}
+
+// 入力の Date/文字列を Date に正規化（失敗は null）
+function toValidDate_(v) {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+
+  const s = String(v).trim();
+  if (!s) return null;
+
+  // "YYYY/MM/DD" を "YYYY-MM-DD" に寄せる
+  const normalized = s.replace(/\//g, "-");
+
+  const d = new Date(normalized);
+  if (!isNaN(d.getTime())) return d;
+
+  // それでも駄目ならそのまま最後に試す
+  const d2 = new Date(s);
+  return isNaN(d2.getTime()) ? null : d2;
+}

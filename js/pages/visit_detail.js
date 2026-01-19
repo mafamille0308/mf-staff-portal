@@ -1,5 +1,5 @@
 // js/pages/visit_detail.js
-import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
+import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst, fmtAgeFromBirthdateJst } from "../ui.js";
 import { callGas, unwrapOne } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 import { toggleVisitDone } from "./visit_done_toggle.js";
@@ -262,10 +262,11 @@ export async function renderVisitDetail(appEl, query) {
           <div class="card">
             <div class="p">
               <div><strong>${escapeHtml(fmt(p.name || p.pet_name || ""))}</strong></div>
-              <div>種類：${escapeHtml(fmt(p.species || p.type || p.pet_type || ""))}</div>
-              <div>品種：${escapeHtml(fmt(p.breed || ""))}</div>
-              <div>年齢：${escapeHtml(fmt(p.age || ""))}</div>
-              <div>メモ：${escapeHtml(fmt(p.notes || p.memo || ""))}</div>
+              <div>種類：${escapeHtml(displayOrDash(fmt(p.species || p.type || p.pet_type || "")))}</div>
+              <div>品種：${escapeHtml(displayOrDash(fmt(p.breed || "")))}</div>
+              <div>誕生日：${escapeHtml(displayOrDash(fmtDateJst(p.birthdate || "")))}</div>
+              <div>年齢：${escapeHtml(displayOrDash(fmtAgeFromBirthdateJst(p.birthdate || "")))}</div>
+              <div>メモ：${escapeHtml(displayOrDash(fmt(p.notes || p.memo || "")))}</div>
               <div>病院：${escapeHtml(displayOrDash(fmt(p.hospital || "")))}</div>
               <div>病院電話：${escapeHtml(displayOrDash(fmt(p.hospital_phone || "")))}</div>
             </div>

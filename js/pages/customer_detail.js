@@ -1,5 +1,5 @@
 // js/pages/customer_detail.js
-import { render, escapeHtml, toast, fmt, displayOrDash, fmtDateTimeJst, fmtDateJst } from "../ui.js";
+import { render, escapeHtml, toast, fmt, displayOrDash, fmtDateTimeJst, fmtDateJst, fmtAgeFromBirthdateJst } from "../ui.js";
 import { callGas, unwrapOne } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 
@@ -237,8 +237,8 @@ export async function renderCustomerDetail(appEl, query) {
               <div><strong>種類</strong>：${escapeHtml(displayOrDash(p.species || p.type || p.pet_type))}</div>
               <div><strong>品種</strong>：${escapeHtml(displayOrDash(p.breed))}</div>
               <div><strong>性別</strong>：${escapeHtml(displayOrDash(p.gender))}</div>
-              <div><strong>誕生日</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.birthdate)))}</div>
-              <div><strong>年齢</strong>：${escapeHtml(displayOrDash(p.age))}</div>
+              <div><strong>誕生日</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.birthdate || "")))}</div>
+              <div><strong>年齢</strong>：${escapeHtml(displayOrDash(fmtAgeFromBirthdateJst(p.birthdate || "")))}</div>
               <div><strong>健康</strong>：${escapeHtml(displayOrDash(p.health))}</div>
               <div><strong>メモ</strong>：${escapeHtml(displayOrDash(p.notes || p.memo))}</div>
               <div><strong>病院</strong>：${escapeHtml(displayOrDash(p.hospital))}</div>
