@@ -102,3 +102,20 @@ export function fmtDateTimeJst(v) {
     pad(d.getMinutes())
   );
 }
+
+// JST 日付のみを人間向けに表示
+// 例: 2025/01/12
+export function fmtDateJst(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return fmt(v);
+
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    d.getFullYear() +
+    "/" +
+    pad(d.getMonth() + 1) +
+    "/" +
+    pad(d.getDate())
+  );
+}

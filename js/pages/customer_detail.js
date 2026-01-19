@@ -1,5 +1,5 @@
 // js/pages/customer_detail.js
-import { render, escapeHtml, toast, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
+import { render, escapeHtml, toast, fmt, displayOrDash, fmtDateTimeJst, fmtDateJst } from "../ui.js";
 import { callGas, unwrapOne } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 
@@ -219,7 +219,7 @@ export async function renderCustomerDetail(appEl, query) {
           <div><strong>ロック番号</strong>：${escapeHtml(displayOrDash(c.lock_no || c.lockNo))}</div>
           <div><strong>メモ</strong>：${escapeHtml(displayOrDash(c.notes))}</div>
           <div><strong>ステージ</strong>：${escapeHtml(displayOrDash(c.stage))}</div>
-          <div><strong>登録日</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(c.registered_date || c.registeredDate)))}</div>
+          <div><strong>登録日</strong>：${escapeHtml(displayOrDash(fmtDateJst(c.registered_date || c.registeredDate)))}</div>
           <div><strong>更新日時</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(c.updated_at || c.updatedAt)))}</div>
         </div>
       </div>
@@ -237,14 +237,14 @@ export async function renderCustomerDetail(appEl, query) {
               <div><strong>種類</strong>：${escapeHtml(displayOrDash(p.species || p.type || p.pet_type))}</div>
               <div><strong>品種</strong>：${escapeHtml(displayOrDash(p.breed))}</div>
               <div><strong>性別</strong>：${escapeHtml(displayOrDash(p.gender))}</div>
-              <div><strong>誕生日</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(p.birthdate)))}</div>
+              <div><strong>誕生日</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.birthdate)))}</div>
               <div><strong>年齢</strong>：${escapeHtml(displayOrDash(p.age))}</div>
               <div><strong>健康</strong>：${escapeHtml(displayOrDash(p.health))}</div>
               <div><strong>メモ</strong>：${escapeHtml(displayOrDash(p.notes || p.memo))}</div>
               <div><strong>病院</strong>：${escapeHtml(displayOrDash(p.hospital))}</div>
               <div><strong>病院電話</strong>：${escapeHtml(displayOrDash(p.hospital_phone))}</div>
               <div><strong>写真URL</strong>：${escapeHtml(displayOrDash(p.photo_url))}</div>
-              <div><strong>登録日</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(p.registered_date)))}</div>
+              <div><strong>登録日</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.registered_date)))}</div>
               <div><strong>更新日時</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(p.updated_at)))}</div>
             </div>
           </div>
