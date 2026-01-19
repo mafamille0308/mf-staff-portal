@@ -1,5 +1,5 @@
 // js/pages/visit_detail.js
-import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst, fmtAgeFromBirthdateJst } from "../ui.js";
+import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst, fmtDateJst, fmtAgeFromBirthdateJst } from "../ui.js";
 import { callGas, unwrapOne } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 import { toggleVisitDone } from "./visit_done_toggle.js";
