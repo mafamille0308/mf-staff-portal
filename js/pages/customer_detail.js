@@ -78,10 +78,13 @@ function renderCareProfile_(cp) {
   `;
 }
 
-function section(title, bodyHtml) {
+function section(title, bodyHtml, actionsHtml) {
   return `
     <div class="hr"></div>
-    <h2 class="h2">${escapeHtml(title)}</h2>
+    <div class="row row-between">
+      <h2 class="h2">${escapeHtml(title)}</h2>
+      <div>${actionsHtml || ""}</div>
+    </div>
     <div class="p">${bodyHtml || ""}</div>
   `;
 }
@@ -116,6 +119,11 @@ export async function renderCustomerDetail(appEl, query) {
     return;
   }
 
+  // ===== local state（このページ内だけ）=====
+  let _mode = "view"; // "view" | "edit"
+  let _busy = false;
+  let _detail = null; // { customer, pets, careProfile }
+
   render(appEl, `
     <section class="section">
       <div class="row row-between">
@@ -143,56 +151,53 @@ export async function renderCustomerDetail(appEl, query) {
     return;
   }
 
-  // ===== cache（直近に開いた詳細は即表示）=====
-  const cacheKey = KEY_CD_CACHE_PREFIX + String(customerId);
+  // ===== events（イベント委譲：DOM差し替え後も壊れない）=====
+  host.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-action]");
+    if (!el) return;
+    const a = el.getAttribute("data-action");
 
-  try {
-    // cache があれば先に利用（任意：体感改善）
-    try {
-      const raw = sessionStorage.getItem(cacheKey);
-      if (raw) {
-        const obj = JSON.parse(raw);
-        if (obj && obj.ts && (Date.now() - Number(obj.ts)) <= CD_CACHE_TTL_MS && obj.detail) {
-          // ここで即表示したい場合は obj.detail を使って描画しても良い（現状は未使用でOK）
-        }
-      }
-    } catch (_) {}
-
-    const res = await callGas({
-      action: "getCustomerDetail",
-      customer_id: customerId,
-      include_pets: true,
-      include_care_profile: true,
-    }, idToken);
-
-    if (!res || res.success === false) {
-      throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
+    if (a === "cd:enter-edit") {
+      if (_busy) return;
+      _mode = "edit";
+      if (_detail) renderHost_(_detail);
+      return;
     }
-    if (res.ctx) setUser(res.ctx);
-
-    // getCustomerDetail は「直置き」返却を最優先で読む（visit_detail の “unwrap → 本体” の思想を踏襲）
-    // 互換：results/result/customer_detail などが来ても吸収
-    const detail =
-      (res.customer || res.pets || res.careProfile || res.care_profile)
-        ? {
-            customer: res.customer || null,
-            pets: Array.isArray(res.pets) ? res.pets : [],
-            careProfile: res.careProfile || res.care_profile || null,
-          }
-        : extractCustomerDetail_(unwrapOne(res) || res);
-
-    if (!detail || !detail.customer) {
-      // 切り分け用：どのキーが存在するかをメッセージに含める
-      const keys = res ? Object.keys(res).slice(0, 50).join(", ") : "(no res)";
-      throw new Error(`顧客詳細が空です。res keys=[${keys}]`);
+    if (a === "cd:cancel-edit") {
+      if (_busy) return;
+      _mode = "view";
+      if (_detail) renderHost_(_detail);
+      return;
     }
+  });
 
-    const c = detail.customer;
+  function renderHeaderActions_() {
+    if (_mode === "view") {
+      return `<button class="btn" type="button" data-action="cd:enter-edit">編集</button>`;
+    }
+    return `
+      <button class="btn btn-ghost" type="button" data-action="cd:cancel-edit">キャンセル</button>
+      <button class="btn" type="button" data-action="cd:save" disabled title="Step2で実装">保存（準備中）</button>
+    `;
+  }
+
+  function renderEditNotice_() {
+    if (_mode !== "edit") return "";
+    return `
+      <div class="hr"></div>
+      <div class="card">
+        <div class="p">編集モードです。内容の編集・保存は次ステップで実装します（現在は切り替えのみ）。</div>
+      </div>
+    `;
+  }
+
+  function renderHost_(detail) {
+    const c = detail.customer || {};
     const pets = Array.isArray(detail.pets) ? detail.pets : [];
     const cp = detail.careProfile || null;
 
     // ===== 顧客 =====
-    const customerHtml = `
+   const customerHtml = `
       <div class="card">
         <div class="p">
           <div><strong>顧客ID</strong>：${escapeHtml(displayOrDash(c.id || c.customer_id || customerId))}</div>
@@ -257,10 +262,60 @@ export async function renderCustomerDetail(appEl, query) {
       : `<p class="p">お世話情報がありません。</p>`;
 
     host.innerHTML = `
-      ${section("顧客情報", customerHtml)}
-      ${section("ペット情報", petsHtml)}
-      ${section("お世話情報", careHtml)}
+      ${section("顧客情報", customerHtml, renderHeaderActions_())}
+      ${renderEditNotice_()}
+      ${section("ペット情報", petsHtml, "")}
+      ${section("お世話情報", careHtml, "")}
     `;
+  }
+
+  // ===== cache（直近に開いた詳細は即表示）=====
+  const cacheKey = KEY_CD_CACHE_PREFIX + String(customerId);
+
+  try {
+    // cache があれば先に利用（任意：体感改善）
+    try {
+      const raw = sessionStorage.getItem(cacheKey);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj && obj.ts && (Date.now() - Number(obj.ts)) <= CD_CACHE_TTL_MS && obj.detail) {
+          // ここで即表示したい場合は obj.detail を使って描画しても良い（現状は未使用でOK）
+        }
+      }
+    } catch (_) {}
+
+    const res = await callGas({
+      action: "getCustomerDetail",
+      customer_id: customerId,
+      include_pets: true,
+      include_care_profile: true,
+    }, idToken);
+
+    if (!res || res.success === false) {
+      throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
+    }
+    if (res.ctx) setUser(res.ctx);
+
+    // getCustomerDetail は「直置き」返却を最優先で読む（visit_detail の “unwrap → 本体” の思想を踏襲）
+    // 互換：results/result/customer_detail などが来ても吸収
+    const detail =
+      (res.customer || res.pets || res.careProfile || res.care_profile)
+        ? {
+            customer: res.customer || null,
+            pets: Array.isArray(res.pets) ? res.pets : [],
+            careProfile: res.careProfile || res.care_profile || null,
+          }
+        : extractCustomerDetail_(unwrapOne(res) || res);
+
+    if (!detail || !detail.customer) {
+      // 切り分け用：どのキーが存在するかをメッセージに含める
+      const keys = res ? Object.keys(res).slice(0, 50).join(", ") : "(no res)";
+      throw new Error(`顧客詳細が空です。res keys=[${keys}]`);
+    }
+
+    _detail = detail;
+    _mode = "view";
+    renderHost_(detail);
 
     // cache 保存
     try {
