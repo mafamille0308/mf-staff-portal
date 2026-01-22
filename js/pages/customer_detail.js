@@ -135,6 +135,13 @@ function normalizeChoice_(val, options) {
   return "その他";
 }
 
+function parkingFeeRuleLabel_(v) {
+  const s = normStr_(v).toLowerCase();
+  if (s === "free" || s === "無料") return "無料";
+  if (s === "paid" || s === "有料") return "有料";
+  return "";
+}
+
 function inputRow_(label, name, value, { type = "text", placeholder = "", help = "", readonly = false } = {}) {
   const ro = readonly ? "readonly" : "";
   return `
@@ -263,7 +270,17 @@ export async function renderCustomerDetail(appEl, query) {
       setIfChanged("email", getFormValue_(formEl, "email"), (c0.email || ""));
       setIfChanged("billing_email", getFormValue_(formEl, "billing_email"), (c0.billing_email || c0.billingEmail || ""));
       setIfChanged("parking_info", getFormValue_(formEl, "parking_info"), (c0.parking_info || c0.parkingInfo || ""));
-      setIfChanged("lock_no", getFormValue_(formEl, "lock_no"), (c0.lock_no || c0.lockNo || ""));
+
+      // 駐車料金区分：UI=無料/有料、保存=free/paid
+      const nextPfr = getFormValue_(formEl, "parking_fee_rule"); // "free" | "paid" | ""
+      const curPfrRaw = (c0.parking_fee_rule || c0.parkingFeeRule || "");
+      const curPfr = (() => {
+        const s = normStr_(curPfrRaw).toLowerCase();
+        if (s === "free" || normStr_(curPfrRaw) === "無料") return "free";
+        if (s === "paid" || normStr_(curPfrRaw) === "有料") return "paid";
+        return "";
+      })();
+      if (nextPfr && nextPfr !== curPfr) patch.parking_fee_rule = nextPfr;      setIfChanged("lock_no", getFormValue_(formEl, "lock_no"), (c0.lock_no || c0.lockNo || ""));
       setIfChanged("notes", getFormValue_(formEl, "notes"), (c0.notes || ""));
 
       // 住所：分割のみ編集。address_full はUIで編集しないが、parts変更時はGASが自動更新する。
@@ -292,6 +309,18 @@ export async function renderCustomerDetail(appEl, query) {
       if (normPickup && normPickup !== normStr_(c0.key_pickup_rule || c0.keyPickupRule)) patch.key_pickup_rule = normPickup;
       if (normReturn && normReturn !== normStr_(c0.key_return_rule || c0.keyReturnRule)) patch.key_return_rule = normReturn;
       if (normLoc    && normLoc    !== normStr_(c0.key_location || c0.keyLocation))       patch.key_location = normLoc;
+
+      // 「その他」詳細：その他選択時のみ送る（パッチセマンティクスを維持）
+      const nextPickupOther = getFormValue_(formEl, "key_pickup_rule_other");
+      const nextReturnOther = getFormValue_(formEl, "key_return_rule_other");
+      const curPickupOther = (c0.key_pickup_rule_other || c0.keyPickupRuleOther || "");
+      const curReturnOther = (c0.key_return_rule_other || c0.keyReturnRuleOther || "");
+      if (normPickup === "その他") {
+        setIfChanged("key_pickup_rule_other", nextPickupOther, curPickupOther);
+      }
+      if (normReturn === "その他") {
+        setIfChanged("key_return_rule_other", nextReturnOther, curReturnOther);
+      }
 
       const patchKeys = Object.keys(patch).filter(k => k !== "action" && k !== "customer_id");
       if (patchKeys.length === 0) {
@@ -359,6 +388,23 @@ export async function renderCustomerDetail(appEl, query) {
     }
   });
 
+  // select の変更に追従して「その他詳細」欄を有効化
+  host.addEventListener("change", (e) => {
+    if (_mode !== "edit") return;
+    const t = e.target;
+    if (!t) return;
+    if (t.matches('select[name="key_pickup_rule"]')) {
+      const formEl = host.querySelector('form[data-el="customerEditForm"]');
+      const otherEl = formEl?.querySelector('input[name="key_pickup_rule_other"]');
+      if (otherEl) otherEl.disabled = (normStr_(t.value) !== "その他");
+    }
+    if (t.matches('select[name="key_return_rule"]')) {
+      const formEl = host.querySelector('form[data-el="customerEditForm"]');
+      const otherEl = formEl?.querySelector('input[name="key_return_rule_other"]');
+      if (otherEl) otherEl.disabled = (normStr_(t.value) !== "その他");
+    }
+  });
+
   function renderHeaderActions_() {
     if (_mode === "view") {
       return `<button class="btn" type="button" data-action="cd:enter-edit" ${_busy ? "disabled" : ""}>編集</button>`;
@@ -391,8 +437,11 @@ export async function renderCustomerDetail(appEl, query) {
           <div><strong>郵便番号</strong>：${escapeHtml(displayOrDash(c.postal_code || (c.address_parts && c.address_parts.postal_code)))}</div>
           <div><strong>住所</strong>：${escapeHtml(displayOrDash(c.address_full || c.addressFull || c.address))}</div>
           <div><strong>駐車場</strong>：${escapeHtml(displayOrDash(c.parking_info || c.parkingInfo))}</div>
+          <div><strong>駐車料金区分</strong>：${escapeHtml(displayOrDash(parkingFeeRuleLabel_(c.parking_fee_rule || c.parkingFeeRule)))}</div>
           <div><strong>鍵受取ルール</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule || c.keyPickupRule))}</div>
+          <div><strong>鍵受取ルール（その他）</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule_other || c.keyPickupRuleOther))}</div>
           <div><strong>鍵返却ルール</strong>：${escapeHtml(displayOrDash(c.key_return_rule || c.keyReturnRule))}</div>
+          <div><strong>鍵返却ルール（その他）</strong>：${escapeHtml(displayOrDash(c.key_return_rule_other || c.keyReturnRuleOther))}</div>
           <div><strong>鍵の所在</strong>：${escapeHtml(displayOrDash(c.key_location || c.keyLocation))}</div>
           <div><strong>ロック番号</strong>：${escapeHtml(displayOrDash(c.lock_no || c.lockNo))}</div>
           <div><strong>メモ</strong>：${escapeHtml(displayOrDash(c.notes))}</div>
@@ -437,12 +486,23 @@ export async function renderCustomerDetail(appEl, query) {
             <div class="hr"></div>
             <div class="p"><strong>鍵</strong></div>
             ${selectRow_("鍵受取ルール", "key_pickup_rule", pickup, KEY_PICKUP_RULE_OPTIONS, { help: (pickup === "その他" && (c.key_pickup_rule || c.keyPickupRule) && !KEY_PICKUP_RULE_OPTIONS.includes(c.key_pickup_rule || c.keyPickupRule)) ? `現行値：${String(c.key_pickup_rule || c.keyPickupRule)}` : "" })}
+            ${inputRow_("鍵受取ルール（その他詳細）", "key_pickup_rule_other", c.key_pickup_rule_other || c.keyPickupRuleOther || "", { placeholder: "例：庭の鉢植えの下", help: "「その他」選択時のみ入力してください。", readonly: false })}
             ${selectRow_("鍵返却ルール", "key_return_rule", ret, KEY_RETURN_RULE_OPTIONS, { help: (ret === "その他" && (c.key_return_rule || c.keyReturnRule) && !KEY_RETURN_RULE_OPTIONS.includes(c.key_return_rule || c.keyReturnRule)) ? `現行値：${String(c.key_return_rule || c.keyReturnRule)}` : "" })}
+            ${inputRow_("鍵返却ルール（その他詳細）", "key_return_rule_other", c.key_return_rule_other || c.keyReturnRuleOther || "", { placeholder: "例：外の物置内、保存容器の中", help: "「その他」選択時のみ入力してください。", readonly: false })}
             ${selectRow_("鍵の所在", "key_location", loc, KEY_LOCATION_OPTIONS)}
             ${inputRow_("ロック番号", "lock_no", c.lock_no || c.lockNo || "", { placeholder: "例：1234" })}
 
             <div class="hr"></div>
             ${inputRow_("駐車場", "parking_info", c.parking_info || c.parkingInfo || "", { placeholder: "例：敷地内 1台分あり" })}
+            <div class="p" style="margin-bottom:10px;">
+              <div style="opacity:.85; margin-bottom:4px;"><strong>駐車料金区分</strong></div>
+              <select class="input" name="parking_fee_rule">
+                <option value="">—</option>
+                <option value="free" ${(normStr_(c.parking_fee_rule || c.parkingFeeRule).toLowerCase() === "free" || normStr_(c.parking_fee_rule || c.parkingFeeRule) === "無料") ? "selected" : ""}>無料</option>
+                <option value="paid" ${(normStr_(c.parking_fee_rule || c.parkingFeeRule).toLowerCase() === "paid" || normStr_(c.parking_fee_rule || c.parkingFeeRule) === "有料") ? "selected" : ""}>有料</option>
+              </select>
+              <div class="p text-sm" style="opacity:.75; margin-top:4px;">保存値は free / paid です。</div>
+            </div>
             <div class="p" style="margin-bottom:10px;">
               <div style="opacity:.85; margin-bottom:4px;"><strong>メモ</strong></div>
               <textarea class="input" name="notes" rows="5" placeholder="引継ぎや注意点など">${escapeHtml(normStr_(c.notes || ""))}</textarea>
@@ -497,6 +557,17 @@ export async function renderCustomerDetail(appEl, query) {
       ${section("ペット情報", petsHtml, "")}
       ${section("お世話情報", careHtml, "")}
     `;
+
+    // 編集モード初期状態：その他詳細欄の有効/無効を反映
+    if (_mode === "edit") {
+      const formEl = host.querySelector('form[data-el="customerEditForm"]');
+      const pickupSel = formEl?.querySelector('select[name="key_pickup_rule"]');
+      const pickupOther = formEl?.querySelector('input[name="key_pickup_rule_other"]');
+      if (pickupOther) pickupOther.disabled = (normStr_(pickupSel?.value) !== "その他");
+      const returnSel = formEl?.querySelector('select[name="key_return_rule"]');
+      const returnOther = formEl?.querySelector('input[name="key_return_rule_other"]');
+      if (returnOther) returnOther.disabled = (normStr_(returnSel?.value) !== "その他");
+    }
   }
 
   // ===== cache（直近に開いた詳細は即表示）=====
