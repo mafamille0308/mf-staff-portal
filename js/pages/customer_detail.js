@@ -6,6 +6,48 @@ import { getIdToken, setUser } from "../auth.js";
 const KEY_CD_CACHE_PREFIX = "mf:customer_detail:cache:v1:";
 const CD_CACHE_TTL_MS = 2 * 60 * 1000; // 2分
 
+// ===== UIラベル（単一ソース）=====
+const FIELD_LABELS_JA = {
+  customer_id: "顧客ID",
+  name: "顧客名",
+  phone: "電話",
+  emergency_phone: "緊急連絡先",
+  email: "メール",
+  billing_email: "請求先メール",
+  postal_code: "郵便番号",
+  address_full: "住所",
+  parking_info: "駐車場",
+  parking_fee_rule: "駐車料金区分",
+  key_pickup_rule: "鍵受取ルール",
+  key_pickup_rule_other: "鍵受取ルール（その他）",
+  key_return_rule: "鍵返却ルール",
+  key_return_rule_other: "鍵返却ルール（その他）",
+  key_location: "鍵の所在",
+  lock_no: "ロック番号",
+  notes: "メモ",
+  stage: "ステージ",
+  registered_date: "登録日",
+  updated_at: "更新日時",
+
+  // edit用（既存表示に合わせて文言はそのまま）
+  name_ro: "顧客名（表示専用）",
+  surname: "姓",
+  given: "名",
+  surname_kana: "姓かな",
+  given_kana: "名かな",
+
+  // address parts
+  address_full_ro: "住所（表示専用）",
+  prefecture: "都道府県",
+  city: "市区町村",
+  address_line1: "町域・番地",
+  address_line2: "建物・部屋",
+
+  // key
+  key_pickup_rule_other_detail: "鍵受取ルール（その他詳細）",
+  key_return_rule_other_detail: "鍵返却ルール（その他詳細）",
+};
+
 // ===== 顧客情報編集時の選択肢（申し込みフォームと統一）=====
 const KEY_PICKUP_RULE_OPTIONS = ["継続保管", "郵送預かり", "メールボックス預かり", "鍵なし", "その他"];
 const KEY_RETURN_RULE_OPTIONS = ["継続保管", "ポスト返却", "メールボックス返却", "郵送返却", "鍵なし", "その他"];
@@ -254,10 +296,26 @@ export async function renderCustomerDetail(appEl, query) {
       }
 
       // 元値と比較して差分のみ送る
-      const setIfChanged = (key, next, cur) => {
-        const n = normStr_(next);
-        const c = normStr_(cur);
-        if (n && n !== c) patch.customer[key] = n;
+      const valOrNull_ = (v) => {
+        // クリアを許可：空欄は null として送る（GAS側で上書き）
+        // ※入力欄が存在しない/取得できない場合のみ null を返さず「未指定」を維持する
+        if (v == null) return undefined; // ← field not found 等は未指定扱い（送らない）
+        const s = normStr_(v);
+        return (s === "") ? null : s;
+      };
+
+      const curNorm_ = (v) => {
+        // 比較用：null/undefined/""
+        const s = normStr_(v);
+        return (s === "") ? "" : s;
+      };
+
+      const setIfChanged = (key, nextRaw, curRaw) => {
+        const next = valOrNull_(nextRaw);     // undefined | null | "text"
+        if (next === undefined) return;       // 取得不可＝未指定＝維持
+        const cur = curNorm_(curRaw);         // "" | "text"
+        const ncmp = (next === null) ? "" : String(next);
+        if (ncmp !== cur) patch.customer[key] = next; // null は「クリア」
       };
 
       setIfChanged("surname", surname, (c0.surname || ""));
@@ -280,6 +338,7 @@ export async function renderCustomerDetail(appEl, query) {
         if (s === "paid" || normStr_(curPfrRaw) === "有料") return "paid";
         return "";
       })();
+      // ここは選択UIなので「未選択」はクリア扱いにしない（誤消し防止）
       if (nextPfr && nextPfr !== curPfr) patch.customer.parking_fee_rule = nextPfr;
       setIfChanged("lock_no", getFormValue_(formEl, "lock_no"), (c0.lock_no || c0.lockNo || ""));
       setIfChanged("notes", getFormValue_(formEl, "notes"), (c0.notes || ""));
@@ -291,7 +350,7 @@ export async function renderCustomerDetail(appEl, query) {
       const apL1     = getFormValue_(formEl, "address_line1");
       const apL2     = getFormValue_(formEl, "address_line2");
 
-      // 差分があるフィールドのみ送る（空欄は「維持」）
+      // 差分があるフィールドのみ送る（空欄は null で「クリア」）
       setIfChanged("postal_code", apPostal, (c0.postal_code || (c0.address_parts && c0.address_parts.postal_code) || ""));
       setIfChanged("prefecture", apPref, (c0.prefecture || (c0.address_parts && c0.address_parts.prefecture) || ""));
       setIfChanged("city", apCity, (c0.city || (c0.address_parts && c0.address_parts.city) || ""));
@@ -322,6 +381,13 @@ export async function renderCustomerDetail(appEl, query) {
       if (normReturn === "その他") {
         setIfChanged("key_return_rule_other", nextReturnOther, curReturnOther);
       }
+      // 「その他」以外に戻した場合は、その他詳細をクリアして整合性維持（UX自然）
+      if (normPickup && normPickup !== "その他") {
+        setIfChanged("key_pickup_rule_other", "", curPickupOther);
+      }
+      if (normReturn && normReturn !== "その他") {
+        setIfChanged("key_return_rule_other", "", curReturnOther);
+      }
 
       const patchKeys = Object.keys(patch.customer).filter(k => k !== "customer_id" && k !== "id");
       if (patchKeys.length === 0) {
@@ -329,13 +395,20 @@ export async function renderCustomerDetail(appEl, query) {
         return;
       }
 
+      const patchLabelsHtml = patchKeys
+        .map(k => escapeHtml(FIELD_LABELS_JA[k] || k))
+        .join("<br>");
+
       const ok = await showModal({
         title: "顧客情報を保存",
         bodyHtml: `
           <div class="p">変更を保存します。よろしいですか？</div>
           <div class="hr"></div>
-          <div class="p text-sm" style="opacity:.75;">変更項目：${escapeHtml(patchKeys.join(", "))}</div>
-          <div class="p text-sm" style="opacity:.75;">空欄の項目は既存値を維持します（このステップではクリアはしません）。</div>
+          <div class="p text-sm" style="opacity:.75;">
+            <div style="margin-bottom:4px;">変更項目：</div>
+            <div style="padding-left:8px; line-height:1.6;">${patchLabelsHtml}</div>
+          </div>
+          <div class="p text-sm" style="opacity:.75;">空欄にした項目は「削除（クリア）」として保存されます。</div>
         `,
         okText: "保存",
         cancelText: "キャンセル",
@@ -420,8 +493,8 @@ export async function renderCustomerDetail(appEl, query) {
     return `
       <div class="card">
         <div class="p">
-          <div><strong>顧客ID</strong>：${escapeHtml(displayOrDash(c.id || c.customer_id || customerId))}</div>
-          <div><strong>顧客名</strong>：${
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.customer_id)}</strong>：${escapeHtml(displayOrDash(c.id || c.customer_id || customerId))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.name)}</strong>：${
             escapeHtml(displayOrDash(c.name))
           }${
             (() => {
@@ -431,24 +504,24 @@ export async function renderCustomerDetail(appEl, query) {
               return kk ? ` <span style="opacity:.75;">(${escapeHtml(kk)})</span>` : "";
             })()
           }</div>
-          <div><strong>電話</strong>：${escapeHtml(displayOrDash(c.phone))}</div>
-          <div><strong>緊急連絡先</strong>：${escapeHtml(displayOrDash(c.emergency_phone || c.emergencyPhone))}</div>
-          <div><strong>メール</strong>：${escapeHtml(displayOrDash(c.email))}</div>
-          <div><strong>請求先メール</strong>：${escapeHtml(displayOrDash(c.billing_email || c.billingEmail))}</div>
-          <div><strong>郵便番号</strong>：${escapeHtml(displayOrDash(c.postal_code || (c.address_parts && c.address_parts.postal_code)))}</div>
-          <div><strong>住所</strong>：${escapeHtml(displayOrDash(c.address_full || c.addressFull || c.address))}</div>
-          <div><strong>駐車場</strong>：${escapeHtml(displayOrDash(c.parking_info || c.parkingInfo))}</div>
-          <div><strong>駐車料金区分</strong>：${escapeHtml(displayOrDash(parkingFeeRuleLabel_(c.parking_fee_rule || c.parkingFeeRule)))}</div>
-          <div><strong>鍵受取ルール</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule || c.keyPickupRule))}</div>
-          <div><strong>鍵受取ルール（その他）</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule_other || c.keyPickupRuleOther))}</div>
-          <div><strong>鍵返却ルール</strong>：${escapeHtml(displayOrDash(c.key_return_rule || c.keyReturnRule))}</div>
-          <div><strong>鍵返却ルール（その他）</strong>：${escapeHtml(displayOrDash(c.key_return_rule_other || c.keyReturnRuleOther))}</div>
-          <div><strong>鍵の所在</strong>：${escapeHtml(displayOrDash(c.key_location || c.keyLocation))}</div>
-          <div><strong>ロック番号</strong>：${escapeHtml(displayOrDash(c.lock_no || c.lockNo))}</div>
-          <div><strong>メモ</strong>：${escapeHtml(displayOrDash(c.notes))}</div>
-          <div><strong>ステージ</strong>：${escapeHtml(displayOrDash(c.stage))}</div>
-          <div><strong>登録日</strong>：${escapeHtml(displayOrDash(fmtDateJst(c.registered_date || c.registeredDate)))}</div>
-          <div><strong>更新日時</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(c.updated_at || c.updatedAt)))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.phone)}</strong>：${escapeHtml(displayOrDash(c.phone))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.emergency_phone)}</strong>：${escapeHtml(displayOrDash(c.emergency_phone || c.emergencyPhone))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.email)}</strong>：${escapeHtml(displayOrDash(c.email))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.billing_email)}</strong>：${escapeHtml(displayOrDash(c.billing_email || c.billingEmail))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.postal_code)}</strong>：${escapeHtml(displayOrDash(c.postal_code || (c.address_parts && c.address_parts.postal_code)))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.address_full)}</strong>：${escapeHtml(displayOrDash(c.address_full || c.addressFull || c.address))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.parking_info)}</strong>：${escapeHtml(displayOrDash(c.parking_info || c.parkingInfo))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.parking_fee_rule)}</strong>：${escapeHtml(displayOrDash(parkingFeeRuleLabel_(c.parking_fee_rule || c.parkingFeeRule)))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_rule)}</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule || c.keyPickupRule))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_rule_other)}</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule_other || c.keyPickupRuleOther))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_rule)}</strong>：${escapeHtml(displayOrDash(c.key_return_rule || c.keyReturnRule))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_rule_other)}</strong>：${escapeHtml(displayOrDash(c.key_return_rule_other || c.keyReturnRuleOther))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_location)}</strong>：${escapeHtml(displayOrDash(c.key_location || c.keyLocation))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.lock_no)}</strong>：${escapeHtml(displayOrDash(c.lock_no || c.lockNo))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.notes)}</strong>：${escapeHtml(displayOrDash(c.notes))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.stage)}</strong>：${escapeHtml(displayOrDash(c.stage))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.registered_date)}</strong>：${escapeHtml(displayOrDash(fmtDateJst(c.registered_date || c.registeredDate)))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.updated_at)}</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(c.updated_at || c.updatedAt)))}</div>
         </div>
       </div>
     `;
@@ -464,39 +537,38 @@ export async function renderCustomerDetail(appEl, query) {
       <form data-el="customerEditForm">
         <div class="card">
           <div class="p">
-            ${inputRow_("顧客名（表示専用）", "name_ro", c.name || "", { readonly: true, help: "編集は姓・名で行ってください。" })}
-            ${inputRow_("姓（surname）", "surname", c.surname || "", { placeholder: "例：佐藤" })}
-            ${inputRow_("名（given）", "given", c.given || "", { placeholder: "例：花子" })}
-            ${inputRow_("姓かな", "surname_kana", c.surname_kana || c.surnameKana || "", { placeholder: "例：さとう" })}
-            ${inputRow_("名かな", "given_kana", c.given_kana || c.givenKana || "", { placeholder: "例：はなこ" })}
-            ${inputRow_("電話", "phone", c.phone || "", { placeholder: "例：09012345678" })}
-            ${inputRow_("緊急連絡先", "emergency_phone", c.emergency_phone || c.emergencyPhone || "", { placeholder: "例：09012345678" })}
-            ${inputRow_("メール", "email", c.email || "", { type: "email", placeholder: "例：xxx@gmail.com" })}
-            ${inputRow_("請求先メール", "billing_email", c.billing_email || c.billingEmail || "", { type: "email", placeholder: "例：billing@gmail.com" })}
+            ${inputRow_(FIELD_LABELS_JA.name_ro, "name_ro", c.name || "", { readonly: true, help: "編集は姓・名で行ってください。" })}
+            ${inputRow_(FIELD_LABELS_JA.surname, "surname", c.surname || "", { placeholder: "例：佐藤" })}
+            ${inputRow_(FIELD_LABELS_JA.given, "given", c.given || "", { placeholder: "例：花子" })}
+            ${inputRow_(FIELD_LABELS_JA.surname_kana, "surname_kana", c.surname_kana || c.surnameKana || "", { placeholder: "例：さとう" })}
+            ${inputRow_(FIELD_LABELS_JA.given_kana, "given_kana", c.given_kana || c.givenKana || "", { placeholder: "例：はなこ" })}
+            ${inputRow_(FIELD_LABELS_JA.phone, "phone", c.phone || "", { placeholder: "例：09012345678" })}
+            ${inputRow_(FIELD_LABELS_JA.emergency_phone, "emergency_phone", c.emergency_phone || c.emergencyPhone || "", { placeholder: "例：09012345678" })}
+            ${inputRow_(FIELD_LABELS_JA.email, "email", c.email || "", { type: "email", placeholder: "例：xxx@gmail.com" })}
+            ${inputRow_(FIELD_LABELS_JA.billing_email, "billing_email", c.billing_email || c.billingEmail || "", { type: "email", placeholder: "例：billing@gmail.com" })}
 
             <div class="hr"></div>
             <div class="p"><strong>住所（分割編集）</strong></div>
-            ${inputRow_("統合住所（表示のみ）", "address_full_ro", (c.address_full || c.addressFull || c.address || ""), { readonly: true })}
-            ${inputRow_("郵便番号", "postal_code", (c.postal_code || ap.postal_code || ""), { placeholder: "例：9800000" })}
-            ${inputRow_("都道府県", "prefecture", (c.prefecture || ap.prefecture || ""), { placeholder: "例：宮城県" })}
-            ${inputRow_("市区町村", "city", (c.city || ap.city || ""), { placeholder: "例：仙台市青葉区" })}
-            ${inputRow_("町域・番地", "address_line1", (c.address_line1 || ap.address_line1 || ""), { placeholder: "例：一番町1-2-3" })}
-            ${inputRow_("建物名など", "address_line2", (c.address_line2 || ap.address_line2 || ""), { placeholder: "例：ma familleビル 101" })}
-            <div class="p text-sm" style="opacity:.75;">住所パーツを変更すると、GAS側で address_full が自動再生成されます（統合住所は直接編集しません）。</div>
+            ${inputRow_(FIELD_LABELS_JA.address_full_ro, "address_full_ro", (c.address_full || c.addressFull || c.address || ""), { readonly: true })}
+            ${inputRow_(FIELD_LABELS_JA.postal_code, "postal_code", (c.postal_code || ap.postal_code || ""), { placeholder: "例：9800000" })}
+            ${inputRow_(FIELD_LABELS_JA.prefecture, "prefecture", (c.prefecture || ap.prefecture || ""), { placeholder: "例：宮城県" })}
+            ${inputRow_(FIELD_LABELS_JA.city, "city", (c.city || ap.city || ""), { placeholder: "例：仙台市青葉区" })}
+            ${inputRow_(FIELD_LABELS_JA.address_line1, "address_line1", (c.address_line1 || ap.address_line1 || ""), { placeholder: "例：一番町1-2-3" })}
+            ${inputRow_(FIELD_LABELS_JA.address_line2, "address_line2", (c.address_line2 || ap.address_line2 || ""), { placeholder: "例：ma familleビル 101" })}
 
             <div class="hr"></div>
             <div class="p"><strong>鍵</strong></div>
-            ${selectRow_("鍵受取ルール", "key_pickup_rule", pickup, KEY_PICKUP_RULE_OPTIONS, { help: (pickup === "その他" && (c.key_pickup_rule || c.keyPickupRule) && !KEY_PICKUP_RULE_OPTIONS.includes(c.key_pickup_rule || c.keyPickupRule)) ? `現行値：${String(c.key_pickup_rule || c.keyPickupRule)}` : "" })}
-            ${inputRow_("鍵受取ルール（その他詳細）", "key_pickup_rule_other", c.key_pickup_rule_other || c.keyPickupRuleOther || "", { placeholder: "例：庭の鉢植えの下", help: "「その他」選択時のみ入力してください。", readonly: false })}
-            ${selectRow_("鍵返却ルール", "key_return_rule", ret, KEY_RETURN_RULE_OPTIONS, { help: (ret === "その他" && (c.key_return_rule || c.keyReturnRule) && !KEY_RETURN_RULE_OPTIONS.includes(c.key_return_rule || c.keyReturnRule)) ? `現行値：${String(c.key_return_rule || c.keyReturnRule)}` : "" })}
-            ${inputRow_("鍵返却ルール（その他詳細）", "key_return_rule_other", c.key_return_rule_other || c.keyReturnRuleOther || "", { placeholder: "例：外の物置内、保存容器の中", help: "「その他」選択時のみ入力してください。", readonly: false })}
-            ${selectRow_("鍵の所在", "key_location", loc, KEY_LOCATION_OPTIONS)}
-            ${inputRow_("ロック番号", "lock_no", c.lock_no || c.lockNo || "", { placeholder: "例：1234" })}
+            ${selectRow_(FIELD_LABELS_JA.key_pickup_rule, "key_pickup_rule", pickup, KEY_PICKUP_RULE_OPTIONS, { help: (pickup === "その他" && (c.key_pickup_rule || c.keyPickupRule) && !KEY_PICKUP_RULE_OPTIONS.includes(c.key_pickup_rule || c.keyPickupRule)) ? `現行値：${String(c.key_pickup_rule || c.keyPickupRule)}` : "" })}
+            ${inputRow_(FIELD_LABELS_JA.key_pickup_rule_other_detail, "key_pickup_rule_other", c.key_pickup_rule_other || c.keyPickupRuleOther || "", { placeholder: "例：庭の鉢植えの下", help: "「その他」選択時のみ入力してください。", readonly: false })}
+            ${selectRow_(FIELD_LABELS_JA.key_return_rule, "key_return_rule", ret, KEY_RETURN_RULE_OPTIONS, { help: (ret === "その他" && (c.key_return_rule || c.keyReturnRule) && !KEY_RETURN_RULE_OPTIONS.includes(c.key_return_rule || c.keyReturnRule)) ? `現行値：${String(c.key_return_rule || c.keyReturnRule)}` : "" })}
+            ${inputRow_(FIELD_LABELS_JA.key_return_rule_other_detail, "key_return_rule_other", c.key_return_rule_other || c.keyReturnRuleOther || "", { placeholder: "例：外の物置内、保存容器の中", help: "「その他」選択時のみ入力してください。", readonly: false })}
+            ${selectRow_(FIELD_LABELS_JA.key_location, "key_location", loc, KEY_LOCATION_OPTIONS)}
+            ${inputRow_(FIELD_LABELS_JA.lock_no, "lock_no", c.lock_no || c.lockNo || "", { placeholder: "例：1234" })}
 
             <div class="hr"></div>
-            ${inputRow_("駐車場", "parking_info", c.parking_info || c.parkingInfo || "", { placeholder: "例：敷地内 1台分あり" })}
+            ${inputRow_(FIELD_LABELS_JA.parking_info, "parking_info", c.parking_info || c.parkingInfo || "", { placeholder: "例：敷地内 1台分あり" })}
             <div class="p" style="margin-bottom:10px;">
-              <div style="opacity:.85; margin-bottom:4px;"><strong>駐車料金区分</strong></div>
+              <div style="opacity:.85; margin-bottom:4px;"><strong>${escapeHtml(FIELD_LABELS_JA.parking_fee_rule)}</strong></div>
               <select class="input" name="parking_fee_rule">
                 <option value="">—</option>
                 <option value="free" ${(normStr_(c.parking_fee_rule || c.parkingFeeRule).toLowerCase() === "free" || normStr_(c.parking_fee_rule || c.parkingFeeRule) === "無料") ? "selected" : ""}>無料</option>
@@ -505,12 +577,8 @@ export async function renderCustomerDetail(appEl, query) {
               <div class="p text-sm" style="opacity:.75; margin-top:4px;">保存値は free / paid です。</div>
             </div>
             <div class="p" style="margin-bottom:10px;">
-              <div style="opacity:.85; margin-bottom:4px;"><strong>メモ</strong></div>
+              <div style="opacity:.85; margin-bottom:4px;"><strong>${escapeHtml(FIELD_LABELS_JA.notes)}</strong></div>
               <textarea class="input" name="notes" rows="5" placeholder="引継ぎや注意点など">${escapeHtml(normStr_(c.notes || ""))}</textarea>
-            </div>
-
-            <div class="p text-sm" style="opacity:.75;">
-              ステージ／登録日／顧客ID は編集対象外です（表示のみ）。
             </div>
           </div>
         </div>
