@@ -239,7 +239,7 @@ export async function renderCustomerDetail(appEl, query) {
 
       // 変更差分（パッチ）：GAS upsertCustomer は undefined をスキップする
       const c0 = _detail.customer || {};
-      const patch = { action: "upsertCustomer", customer_id: (c0.id || c0.customer_id || customerId) };
+      const patch = { action: "upsertCustomer", customer: { customer_id: (c0.id || c0.customer_id || customerId) } };
 
       // 氏名（surname/given が来ていれば GAS 側で name を再構成）
       const surname = getFormValue_(formEl, "surname");
@@ -257,7 +257,7 @@ export async function renderCustomerDetail(appEl, query) {
       const setIfChanged = (key, next, cur) => {
         const n = normStr_(next);
         const c = normStr_(cur);
-        if (n && n !== c) patch[key] = n;
+        if (n && n !== c) patch.customer[key] = n;
       };
 
       setIfChanged("surname", surname, (c0.surname || ""));
@@ -280,7 +280,8 @@ export async function renderCustomerDetail(appEl, query) {
         if (s === "paid" || normStr_(curPfrRaw) === "有料") return "paid";
         return "";
       })();
-      if (nextPfr && nextPfr !== curPfr) patch.parking_fee_rule = nextPfr;      setIfChanged("lock_no", getFormValue_(formEl, "lock_no"), (c0.lock_no || c0.lockNo || ""));
+      if (nextPfr && nextPfr !== curPfr) patch.customer.parking_fee_rule = nextPfr;
+      setIfChanged("lock_no", getFormValue_(formEl, "lock_no"), (c0.lock_no || c0.lockNo || ""));
       setIfChanged("notes", getFormValue_(formEl, "notes"), (c0.notes || ""));
 
       // 住所：分割のみ編集。address_full はUIで編集しないが、parts変更時はGASが自動更新する。
@@ -306,9 +307,9 @@ export async function renderCustomerDetail(appEl, query) {
       const normLoc    = nextLoc    ? normalizeChoice_(nextLoc,    KEY_LOCATION_OPTIONS)    : "";
 
       // 選択済みの時だけ差分送信
-      if (normPickup && normPickup !== normStr_(c0.key_pickup_rule || c0.keyPickupRule)) patch.key_pickup_rule = normPickup;
-      if (normReturn && normReturn !== normStr_(c0.key_return_rule || c0.keyReturnRule)) patch.key_return_rule = normReturn;
-      if (normLoc    && normLoc    !== normStr_(c0.key_location || c0.keyLocation))       patch.key_location = normLoc;
+      if (normPickup && normPickup !== normStr_(c0.key_pickup_rule || c0.keyPickupRule)) patch.customer.key_pickup_rule = normPickup;
+      if (normReturn && normReturn !== normStr_(c0.key_return_rule || c0.keyReturnRule)) patch.customer.key_return_rule = normReturn;
+      if (normLoc    && normLoc    !== normStr_(c0.key_location || c0.keyLocation))       patch.customer.key_location = normLoc;
 
       // 「その他」詳細：その他選択時のみ送る（パッチセマンティクスを維持）
       const nextPickupOther = getFormValue_(formEl, "key_pickup_rule_other");
@@ -322,7 +323,7 @@ export async function renderCustomerDetail(appEl, query) {
         setIfChanged("key_return_rule_other", nextReturnOther, curReturnOther);
       }
 
-      const patchKeys = Object.keys(patch).filter(k => k !== "action" && k !== "customer_id");
+      const patchKeys = Object.keys(patch.customer).filter(k => k !== "customer_id" && k !== "id");
       if (patchKeys.length === 0) {
         toast({ title: "変更なし", message: "保存する変更がありません。" });
         return;
