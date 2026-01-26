@@ -647,8 +647,10 @@ export async function renderCustomerDetail(appEl, query) {
 
         const resUp = await callGas({
           action: "upsertPets",
-          customer_id: customerId,
-          pets: [patchPet],
+          pets: {
+            customer_id: customerId,
+            pets: [patchPet],
+          }
         }, idToken);
         if (!resUp || resUp.ok === false) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed");
         if (resUp.ctx) setUser(resUp.ctx);
