@@ -55,9 +55,41 @@ const KEY_PICKUP_RULE_OPTIONS = ["継続保管", "郵送預かり", "メール�
 const KEY_RETURN_RULE_OPTIONS = ["継続保管", "ポスト返却", "メールボックス返却", "郵送返却", "鍵なし", "その他"];
 const KEY_LOCATION_OPTIONS    = ["顧客", "本部", "担当者", "鍵なし"];
 
+// ===== ペット用 UIラベル（単一ソース）=====
+const PET_FIELD_LABELS_JA = {
+  pet_id: "ペットID",
+  customer_id: "顧客ID",
+  name: "ペット名",
+  species: "種類",
+  breed: "品種",
+  gender: "性別",
+  birthdate: "誕生日",
+  age: "年齢",
+  weight_kg: "体重(kg)",
+  rabies_vaccine_at: "狂犬病予防注射",
+  combo_vaccine_at: "混合ワクチン",
+  health: "健康",
+  notes: "メモ",
+  hospital: "病院",
+  hospital_phone: "病院電話",
+  registered_date: "登録日",
+  updated_at: "更新日時",
+  is_active: "有効",
+};
+
+// ===== ペット情報編集時の選択肢 =====
+const KEY_SPECIES_OPTIONS = ["犬", "猫", "小動物"];
+const KEY_GENDER_OPTIONS  = ["オス", "オス（去勢）", "メス", "メス（避妊）", "不明"];
+
 function normStr_(v) {
   const s = fmt(v);
   return (s == null) ? "" : String(s).trim();
+}
+
+function inputDateRow_(label, name, value, { help = "", readonly = false } = {}) {
+  // GAS 側は normalizeDateKeyJst を通す想定なので、yyyy-mm-dd を渡せばOK
+  const v = normStr_(value); // すでに date key で来る前提（buildPetObjFromRow）
+  return inputRow_(label, name, v, { type: "date", placeholder: "", help, readonly });
 }
 
 function pickFirst_(obj, keys) {
@@ -237,6 +269,10 @@ export async function renderCustomerDetail(appEl, query) {
   let _mode = "view"; // "view" | "edit"
   let _busy = false;
   let _detail = null; // { customer, pets, careProfile }
+
+  // ===== pets local state（ペットは個別編集）=====
+  let _petEditId = "";   // 現在編集中の pet_id
+  let _petBusy = false;  // ペット保存中
 
   render(appEl, `
     <section class="section">
@@ -489,6 +525,173 @@ export async function renderCustomerDetail(appEl, query) {
         if (_detail) renderHost_(_detail);
       }
     }
+
+    // ===== ペット：編集開始 =====
+    if (a === "pet:enter-edit") {
+      if (_petBusy) return;
+      const pid = btn.getAttribute("data-pet-id") || "";
+      if (!pid) return;
+      _petEditId = pid;
+      if (_detail) renderHost_(_detail);
+      return;
+    }
+
+    // ===== ペット：キャンセル =====
+    if (a === "pet:cancel-edit") {
+      if (_petBusy) return;
+      _petEditId = "";
+      if (_detail) renderHost_(_detail);
+      return;
+    }
+
+   // ===== ペット：保存 =====
+   if (a === "pet:save") {
+      if (_petBusy) return;
+      if (!_detail || !_detail.customer) return;
+      const pid = btn.getAttribute("data-pet-id") || "";
+      if (!pid) return;
+
+      const formEl = host.querySelector(`form[data-el="petEditForm"][data-pet-id="${CSS.escape(pid)}"]`);
+      if (!formEl) return;
+
+      const pets = Array.isArray(_detail.pets) ? _detail.pets : [];
+      const p0 = pets.find(x => String(x?.id || x?.pet_id || "") === String(pid)) || {};
+
+      const valOrNull_ = (v) => {
+        if (v == null) return undefined; // 取得不可＝未指定
+        const s = normStr_(v);
+        return (s === "") ? null : s;    // 空欄＝クリア
+      };
+      const curNorm_ = (v) => {
+        const s = normStr_(v);
+        return (s === "") ? "" : s;
+      };
+      const setIfChanged = (key, nextRaw, curRaw) => {
+        const next = valOrNull_(nextRaw); // undefined | null | "text"
+        if (next === undefined) return;
+        const cur = curNorm_(curRaw);
+        const ncmp = (next === null) ? "" : String(next);
+        if (ncmp !== cur) patchPet[key] = next; // null は「クリア」
+      };
+
+      // upsertPets: undefined は既存保持 / null はクリア
+      const patchPet = { pet_id: (p0.id || p0.pet_id || pid) };
+
+      // 必須：ペット名（GAS側も name 無いとスキップする）
+      const nextName = getFormValue_(formEl, "name");
+      if (!nextName) {
+        toast({ title: "入力不足", message: "ペット名を入力してください。" });
+        return;
+      }
+
+      setIfChanged("name", nextName, (p0.name || p0.pet_name || ""));
+      setIfChanged("species", getFormValue_(formEl, "species"), (p0.species || p0.type || p0.pet_type || ""));
+      setIfChanged("breed", getFormValue_(formEl, "breed"), (p0.breed || ""));
+      setIfChanged("gender", getFormValue_(formEl, "gender"), (p0.gender || p0.sex || ""));
+
+      // 日付：date picker → yyyy-mm-dd を送る
+     setIfChanged("birthdate", getFormValue_(formEl, "birthdate"), (p0.birthdate || ""));
+      setIfChanged("rabies_vaccine_at", getFormValue_(formEl, "rabies_vaccine_at"), (p0.rabies_vaccine_at || ""));
+      setIfChanged("combo_vaccine_at", getFormValue_(formEl, "combo_vaccine_at"), (p0.combo_vaccine_at || ""));
+
+      // 数値は文字列で送ってOK（GAS側はシートにそのまま入る）
+      setIfChanged("weight_kg", getFormValue_(formEl, "weight_kg"), (p0.weight_kg || ""));
+
+      // テキスト
+      setIfChanged("health", getFormValue_(formEl, "health"), (p0.health || ""));
+      setIfChanged("notes", getFormValue_(formEl, "notes"), (p0.notes || p0.memo || ""));
+      setIfChanged("hospital", getFormValue_(formEl, "hospital"), (p0.hospital || ""));
+      setIfChanged("hospital_phone", getFormValue_(formEl, "hospital_phone"), (p0.hospital_phone || ""));
+
+      // is_active（チェックボックス）
+      {
+        const el = formEl.querySelector('input[name="is_active"]');
+        if (el) {
+          const next = el.checked;
+          const cur = (p0.is_active === "" || p0.is_active == null) ? true : !!p0.is_active;
+          if (next !== cur) patchPet.is_active = next;
+        }
+      }
+
+      const patchKeys = Object.keys(patchPet).filter(k => k !== "pet_id" && k !== "id");
+      if (patchKeys.length === 0) {
+        toast({ title: "変更なし", message: "保存する変更がありません。" });
+        _petEditId = "";
+        renderHost_(_detail);
+        return;
+      }
+
+      const patchLabelsHtml = patchKeys
+        .map(k => escapeHtml(PET_FIELD_LABELS_JA[k] || k))
+        .join("<br>");
+
+      const ok = await showModal({
+        title: "ペット情報を保存",
+        bodyHtml: `
+          <div class="p">変更を保存します。よろしいですか？</div>
+          <div class="hr"></div>
+          <div class="p text-sm" style="opacity:.75;">
+            <div style="margin-bottom:4px;">変更項目：</div>
+            <div style="padding-left:8px; line-height:1.6;">${patchLabelsHtml}</div>
+          </div>
+          <div class="p text-sm" style="opacity:.75;">空欄にした項目は「削除（クリア）」として保存されます。</div>
+        `,
+        okText: "保存",
+        cancelText: "キャンセル",
+      });
+      if (!ok) return;
+
+      try {
+        _petBusy = true;
+        renderHost_(_detail);
+
+        const resUp = await callGas({
+          action: "upsertPets",
+          customer_id: customerId,
+          pets: [patchPet],
+        }, idToken);
+        if (!resUp || resUp.ok === false) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed");
+        if (resUp.ctx) setUser(resUp.ctx);
+
+        toast({ title: "保存完了", message: "ペット情報を更新しました。" });
+
+        // 再取得して反映（単一ソース：getCustomerDetail）
+        const res = await callGas({
+          action: "getCustomerDetail",
+          customer_id: customerId,
+          include_pets: true,
+          include_care_profile: true,
+        }, idToken);
+        if (!res || res.success === false) throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
+        if (res.ctx) setUser(res.ctx);
+
+        const detail =
+          (res.customer || res.pets || res.careProfile || res.care_profile)
+            ? {
+                customer: res.customer || null,
+                pets: Array.isArray(res.pets) ? res.pets : [],
+                careProfile: res.careProfile || res.care_profile || null,
+              }
+            : extractCustomerDetail_(unwrapOne(res) || res);
+
+        if (!detail || !detail.customer) throw new Error("再取得に失敗しました（detail.customer が空）");
+        _detail = detail;
+        _petEditId = "";
+        renderHost_(detail);
+
+        // cache 更新
+        try {
+          const cacheKey = KEY_CD_CACHE_PREFIX + String(customerId);
+          sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), detail }));
+        } catch (_) {}
+      } catch (err) {
+        toast({ title: "保存失敗", message: err?.message || String(err) });
+      } finally {
+        _petBusy = false;
+        if (_detail) renderHost_(_detail);
+      }
+      return;
+    }
   });
 
   // select の変更に追従して「その他詳細」欄を有効化
@@ -641,29 +844,96 @@ export async function renderCustomerDetail(appEl, query) {
 
     const customerHtml = (_mode === "edit") ? renderCustomerEditHtml_(c) : renderCustomerViewHtml_(c);
 
-    // ===== ペット =====（Step3で編集・追加）
-    const petsHtml = pets.length
-      ? `
-        ${pets.map(p => `
-          <div class="card">
-            <div class="p">
-              <div><strong>${escapeHtml(displayOrDash(p.name || p.pet_name))}</strong></div>
-              <div><strong>ペットID</strong>：${escapeHtml(displayOrDash(p.id || p.pet_id))}</div>
-              <div><strong>顧客ID</strong>：${escapeHtml(displayOrDash(p.customer_id || customerId))}</div>
-              <div><strong>種類</strong>：${escapeHtml(displayOrDash(p.species || p.type || p.pet_type))}</div>
-              <div><strong>品種</strong>：${escapeHtml(displayOrDash(p.breed))}</div>
-              <div><strong>性別</strong>：${escapeHtml(displayOrDash(p.gender))}</div>
-              <div><strong>誕生日</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.birthdate || "")))}</div>
-              <div><strong>年齢</strong>：${escapeHtml(displayOrDash(fmtAgeFromBirthdateJst(p.birthdate || "")))}</div>
-              <div><strong>健康</strong>：${escapeHtml(displayOrDash(p.health))}</div>
-              <div><strong>メモ</strong>：${escapeHtml(displayOrDash(p.notes || p.memo))}</div>
-              <div><strong>病院</strong>：${escapeHtml(displayOrDash(p.hospital))}</div>
-              <div><strong>病院電話</strong>：${escapeHtml(displayOrDash(p.hospital_phone))}</div>
-              <div><strong>登録日</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.registered_date)))}</div>
-              <div><strong>更新日時</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(p.updated_at)))}</div>
+    // ===== ペット =====
+    function renderPetView_(p) {
+      const pid = String(p?.id || p?.pet_id || "");
+      return `
+        <div class="card">
+          <div class="row row-between">
+            <div class="p"><strong>${escapeHtml(displayOrDash(p.name || p.pet_name))}</strong></div>
+            <div>
+              <button class="btn" type="button" data-action="pet:enter-edit" data-pet-id="${escapeHtml(pid)}" ${_petBusy ? "disabled" : ""}>編集</button>
             </div>
           </div>
-        `).join("")}
+          <div class="p">
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.pet_id)}</strong>：${escapeHtml(displayOrDash(p.id || p.pet_id))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.customer_id)}</strong>：${escapeHtml(displayOrDash(p.customer_id || customerId))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.species)}</strong>：${escapeHtml(displayOrDash(p.species || p.type || p.pet_type))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.breed)}</strong>：${escapeHtml(displayOrDash(p.breed))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.gender)}</strong>：${escapeHtml(displayOrDash(p.gender))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.birthdate)}</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.birthdate || "")))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.age)}</strong>：${escapeHtml(displayOrDash(fmtAgeFromBirthdateJst(p.birthdate || "")))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.weight_kg)}</strong>：${escapeHtml(displayOrDash(p.weight_kg))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.health)}</strong>：${escapeHtml(displayOrDash(p.health))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.notes)}</strong>：${escapeHtml(displayOrDash(p.notes || p.memo))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.hospital)}</strong>：${escapeHtml(displayOrDash(p.hospital))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.hospital_phone)}</strong>：${escapeHtml(displayOrDash(p.hospital_phone))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.rabies_vaccine_at)}</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.rabies_vaccine_at)))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.combo_vaccine_at)}</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.combo_vaccine_at)))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.is_active)}</strong>：${escapeHtml((p.is_active === false || String(p.is_active).toLowerCase() === "false") ? "無効" : "有効")}</div>
+           <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.registered_date)}</strong>：${escapeHtml(displayOrDash(fmtDateJst(p.registered_date)))}</div>
+            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.updated_at)}</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(p.updated_at)))}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderPetEdit_(p) {
+      const pid = String(p?.id || p?.pet_id || "");
+      const species = normalizeChoice_(p.species || p.type || p.pet_type, KEY_SPECIES_OPTIONS);
+      const gender  = normalizeChoice_(p.gender || p.sex, KEY_GENDER_OPTIONS);
+      const isActiveCur = (p.is_active === "" || p.is_active == null) ? true : !!p.is_active;
+
+      return `
+        <form data-el="petEditForm" data-pet-id="${escapeHtml(pid)}">
+         <div class="card">
+            <div class="row row-between">
+              <div class="p"><strong>${escapeHtml(displayOrDash(p.name || p.pet_name))}</strong></div>
+              <div>
+                <button class="btn btn-ghost" type="button" data-action="pet:cancel-edit" data-pet-id="${escapeHtml(pid)}" ${_petBusy ? "disabled" : ""}>キャンセル</button>
+                <button class="btn" type="button" data-action="pet:save" data-pet-id="${escapeHtml(pid)}" ${_petBusy ? "disabled" : ""}>保存</button>
+              </div>
+            </div>
+            <div class="p">
+              ${inputRow_(PET_FIELD_LABELS_JA.pet_id, "pet_id_ro", (p.id || p.pet_id || ""), { readonly: true })}
+              ${inputRow_(PET_FIELD_LABELS_JA.name, "name", (p.name || p.pet_name || ""), { placeholder: "例：ゆべし" })}
+              ${selectRow_(PET_FIELD_LABELS_JA.species, "species", species, KEY_SPECIES_OPTIONS)}
+              ${inputRow_(PET_FIELD_LABELS_JA.breed, "breed", (p.breed || ""), { placeholder: "例：柴犬 / 雑種" })}
+              ${selectRow_(PET_FIELD_LABELS_JA.gender, "gender", gender, KEY_GENDER_OPTIONS)}
+              ${inputDateRow_(PET_FIELD_LABELS_JA.birthdate, "birthdate", (p.birthdate || ""), { help: "未設定の場合は空欄でOK" })}
+              ${inputRow_(PET_FIELD_LABELS_JA.weight_kg, "weight_kg", (p.weight_kg || ""), { placeholder: "例：4.2" })}
+
+              <div class="hr"></div>
+              ${inputDateRow_(PET_FIELD_LABELS_JA.rabies_vaccine_at, "rabies_vaccine_at", (p.rabies_vaccine_at || ""), { help: "yyyy-mm-dd" })}
+              ${inputDateRow_(PET_FIELD_LABELS_JA.combo_vaccine_at, "combo_vaccine_at", (p.combo_vaccine_at || ""), { help: "yyyy-mm-dd" })}
+
+              <div class="hr"></div>
+              ${inputRow_(PET_FIELD_LABELS_JA.health, "health", (p.health || ""), { placeholder: "健康上の注意など" })}
+              <div class="p" style="margin-bottom:10px;">
+                <div style="opacity:.85; margin-bottom:4px;"><strong>${escapeHtml(PET_FIELD_LABELS_JA.notes)}</strong></div>
+                <textarea class="input" name="notes" rows="4" placeholder="メモ">${escapeHtml(normStr_(p.notes || p.memo || ""))}</textarea>
+              </div>
+              ${inputRow_(PET_FIELD_LABELS_JA.hospital, "hospital", (p.hospital || ""), { placeholder: "例：○○動物病院" })}
+              ${inputRow_(PET_FIELD_LABELS_JA.hospital_phone, "hospital_phone", (p.hospital_phone || ""), { placeholder: "例：0221234567" })}
+
+              <div class="hr"></div>
+              <label class="p" style="display:flex; gap:8px; align-items:center;">
+                <input type="checkbox" name="is_active" ${isActiveCur ? "checked" : ""}/>
+                <span><strong>${escapeHtml(PET_FIELD_LABELS_JA.is_active)}</strong></span>
+              </label>
+            </div>
+          </div>
+        </form>
+      `;
+    }
+
+    const petsHtml = pets.length
+      ? `
+        ${pets.map(p => {
+          const pid = String(p?.id || p?.pet_id || "");
+          const petBody = (pid && _petEditId === pid) ? renderPetEdit_(p) : renderPetView_(p);
+          return petBody;
+        }).join("")}
       `
       : `<p class="p">ペット情報がありません。</p>`;
 
