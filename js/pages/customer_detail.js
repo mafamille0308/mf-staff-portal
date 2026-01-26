@@ -18,10 +18,12 @@ const FIELD_LABELS_JA = {
   address_full: "住所",
   parking_info: "駐車場",
   parking_fee_rule: "駐車料金区分",
-  key_pickup_rule: "鍵受取ルール",
-  key_pickup_rule_other: "鍵受取ルール（その他）",
+  key_pickup_rule: "鍵預かりルール",
+  key_pickup_rule_other: "鍵預かりルール（その他）",
+  key_pickup_fee_rule: "鍵預かり料金区分",
   key_return_rule: "鍵返却ルール",
   key_return_rule_other: "鍵返却ルール（その他）",
+  key_return_fee_rule: "鍵返却料金区分",
   key_location: "鍵の所在",
   lock_no: "ロック番号",
   notes: "メモ",
@@ -181,6 +183,15 @@ function parkingFeeRuleLabel_(v) {
   const s = normStr_(v).toLowerCase();
   if (s === "free" || s === "無料") return "無料";
   if (s === "paid" || s === "有料") return "有料";
+  if (s === "unknown" || s === "不明") return "不明";
+  return "";
+}
+
+function keyFeeRuleLabel_(v) {
+  const s = normStr_(v).toLowerCase();
+  if (s === "free" || s === "無料") return "無料";
+  if (s === "paid" || s === "有料") return "有料";
+  if (s === "unknown" || s === "不明") return "不明";
   return "";
 }
 
@@ -329,7 +340,7 @@ export async function renderCustomerDetail(appEl, query) {
       setIfChanged("billing_email", getFormValue_(formEl, "billing_email"), (c0.billing_email || c0.billingEmail || ""));
       setIfChanged("parking_info", getFormValue_(formEl, "parking_info"), (c0.parking_info || c0.parkingInfo || ""));
 
-      // 駐車料金区分：UI=無料/有料、保存=free/paid
+      // 駐車料金区分：UI=無料/有料（表示のみ unknown 対応）、保存=free/paid（未選択は誤消し防止で送らない）
       const nextPfr = getFormValue_(formEl, "parking_fee_rule"); // "free" | "paid" | ""
       const curPfrRaw = (c0.parking_fee_rule || c0.parkingFeeRule || "");
       const curPfr = (() => {
@@ -342,6 +353,24 @@ export async function renderCustomerDetail(appEl, query) {
       if (nextPfr && nextPfr !== curPfr) patch.customer.parking_fee_rule = nextPfr;
       setIfChanged("lock_no", getFormValue_(formEl, "lock_no"), (c0.lock_no || c0.lockNo || ""));
       setIfChanged("notes", getFormValue_(formEl, "notes"), (c0.notes || ""));
+
+      // 鍵料金区分：UI=無料/有料（表示のみ unknown 対応）、保存=free/paid（未選択は誤消し防止で送らない）
+      const nextKpfr = getFormValue_(formEl, "key_pickup_fee_rule"); // "free" | "paid" | ""
+      const nextKrfr = getFormValue_(formEl, "key_return_fee_rule"); // "free" | "paid" | ""
+      const curKpfrRaw = (c0.key_pickup_fee_rule || c0.keyPickupFeeRule || "");
+      const curKrfrRaw = (c0.key_return_fee_rule || c0.keyReturnFeeRule || "");
+
+      const normKeyFeeRule_ = (raw) => {
+        const s = normStr_(raw).toLowerCase();
+        if (s === "free" || normStr_(raw) === "無料") return "free";
+        if (s === "paid" || normStr_(raw) === "有料") return "paid";
+        return "";
+      };
+      const curKpfr = normKeyFeeRule_(curKpfrRaw);
+      const curKrfr = normKeyFeeRule_(curKrfrRaw);
+
+      if (nextKpfr && nextKpfr !== curKpfr) patch.customer.key_pickup_fee_rule = nextKpfr;
+      if (nextKrfr && nextKrfr !== curKrfr) patch.customer.key_return_fee_rule = nextKrfr;
 
       // 住所：分割のみ編集。address_full はUIで編集しないが、parts変更時はGASが自動更新する。
       const apPostal = getFormValue_(formEl, "postal_code");
@@ -514,8 +543,10 @@ export async function renderCustomerDetail(appEl, query) {
           <div><strong>${escapeHtml(FIELD_LABELS_JA.parking_fee_rule)}</strong>：${escapeHtml(displayOrDash(parkingFeeRuleLabel_(c.parking_fee_rule || c.parkingFeeRule)))}</div>
           <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_rule)}</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule || c.keyPickupRule))}</div>
           <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_rule_other)}</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule_other || c.keyPickupRuleOther))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_fee_rule)}</strong>：${escapeHtml(displayOrDash(keyFeeRuleLabel_(c.key_pickup_fee_rule || c.keyPickupFeeRule)))}</div>
           <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_rule)}</strong>：${escapeHtml(displayOrDash(c.key_return_rule || c.keyReturnRule))}</div>
           <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_rule_other)}</strong>：${escapeHtml(displayOrDash(c.key_return_rule_other || c.keyReturnRuleOther))}</div>
+          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_fee_rule)}</strong>：${escapeHtml(displayOrDash(keyFeeRuleLabel_(c.key_return_fee_rule || c.keyReturnFeeRule)))}</div>
           <div><strong>${escapeHtml(FIELD_LABELS_JA.key_location)}</strong>：${escapeHtml(displayOrDash(c.key_location || c.keyLocation))}</div>
           <div><strong>${escapeHtml(FIELD_LABELS_JA.lock_no)}</strong>：${escapeHtml(displayOrDash(c.lock_no || c.lockNo))}</div>
           <div><strong>${escapeHtml(FIELD_LABELS_JA.notes)}</strong>：${escapeHtml(displayOrDash(c.notes))}</div>
@@ -532,6 +563,8 @@ export async function renderCustomerDetail(appEl, query) {
     const pickup = normalizeChoice_(c.key_pickup_rule || c.keyPickupRule, KEY_PICKUP_RULE_OPTIONS);
     const ret    = normalizeChoice_(c.key_return_rule || c.keyReturnRule, KEY_RETURN_RULE_OPTIONS);
     const loc    = normalizeChoice_(c.key_location || c.keyLocation, KEY_LOCATION_OPTIONS);
+    const kpfr   = normStr_(c.key_pickup_fee_rule || c.keyPickupFeeRule).toLowerCase();
+    const krfr   = normStr_(c.key_return_fee_rule || c.keyReturnFeeRule).toLowerCase();
 
     return `
       <form data-el="customerEditForm">
@@ -560,8 +593,24 @@ export async function renderCustomerDetail(appEl, query) {
             <div class="p"><strong>鍵</strong></div>
             ${selectRow_(FIELD_LABELS_JA.key_pickup_rule, "key_pickup_rule", pickup, KEY_PICKUP_RULE_OPTIONS, { help: (pickup === "その他" && (c.key_pickup_rule || c.keyPickupRule) && !KEY_PICKUP_RULE_OPTIONS.includes(c.key_pickup_rule || c.keyPickupRule)) ? `現行値：${String(c.key_pickup_rule || c.keyPickupRule)}` : "" })}
             ${inputRow_(FIELD_LABELS_JA.key_pickup_rule_other_detail, "key_pickup_rule_other", c.key_pickup_rule_other || c.keyPickupRuleOther || "", { placeholder: "例：庭の鉢植えの下", help: "「その他」選択時のみ入力してください。", readonly: false })}
+            <div class="p" style="margin-bottom:10px;">
+              <div style="opacity:.85; margin-bottom:4px;"><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_fee_rule)}</strong></div>
+              <select class="input" name="key_pickup_fee_rule">
+                <option value="">—</option>
+                <option value="free" ${(kpfr === "free" || normStr_(c.key_pickup_fee_rule || c.keyPickupFeeRule) === "無料") ? "selected" : ""}>無料</option>
+                <option value="paid" ${(kpfr === "paid" || normStr_(c.key_pickup_fee_rule || c.keyPickupFeeRule) === "有料") ? "selected" : ""}>有料</option>
+              </select>
+            </div>    
             ${selectRow_(FIELD_LABELS_JA.key_return_rule, "key_return_rule", ret, KEY_RETURN_RULE_OPTIONS, { help: (ret === "その他" && (c.key_return_rule || c.keyReturnRule) && !KEY_RETURN_RULE_OPTIONS.includes(c.key_return_rule || c.keyReturnRule)) ? `現行値：${String(c.key_return_rule || c.keyReturnRule)}` : "" })}
             ${inputRow_(FIELD_LABELS_JA.key_return_rule_other_detail, "key_return_rule_other", c.key_return_rule_other || c.keyReturnRuleOther || "", { placeholder: "例：外の物置内、保存容器の中", help: "「その他」選択時のみ入力してください。", readonly: false })}
+            <div class="p" style="margin-bottom:10px;">
+              <div style="opacity:.85; margin-bottom:4px;"><strong>${escapeHtml(FIELD_LABELS_JA.key_return_fee_rule)}</strong></div>
+              <select class="input" name="key_return_fee_rule">
+                <option value="">—</option>
+                <option value="free" ${(krfr === "free" || normStr_(c.key_return_fee_rule || c.keyReturnFeeRule) === "無料") ? "selected" : ""}>無料</option>
+                <option value="paid" ${(krfr === "paid" || normStr_(c.key_return_fee_rule || c.keyReturnFeeRule) === "有料") ? "selected" : ""}>有料</option>
+              </select>
+            </div>
             ${selectRow_(FIELD_LABELS_JA.key_location, "key_location", loc, KEY_LOCATION_OPTIONS)}
             ${inputRow_(FIELD_LABELS_JA.lock_no, "lock_no", c.lock_no || c.lockNo || "", { placeholder: "例：1234" })}
 
@@ -574,7 +623,6 @@ export async function renderCustomerDetail(appEl, query) {
                 <option value="free" ${(normStr_(c.parking_fee_rule || c.parkingFeeRule).toLowerCase() === "free" || normStr_(c.parking_fee_rule || c.parkingFeeRule) === "無料") ? "selected" : ""}>無料</option>
                 <option value="paid" ${(normStr_(c.parking_fee_rule || c.parkingFeeRule).toLowerCase() === "paid" || normStr_(c.parking_fee_rule || c.parkingFeeRule) === "有料") ? "selected" : ""}>有料</option>
               </select>
-              <div class="p text-sm" style="opacity:.75; margin-top:4px;">保存値は free / paid です。</div>
             </div>
             <div class="p" style="margin-bottom:10px;">
               <div style="opacity:.85; margin-bottom:4px;"><strong>${escapeHtml(FIELD_LABELS_JA.notes)}</strong></div>
