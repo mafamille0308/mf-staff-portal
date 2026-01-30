@@ -273,6 +273,7 @@ export async function renderCustomerDetail(appEl, query) {
   // ===== pets local state（ペットは個別編集）=====
   let _petEditId = "";   // 現在編集中の pet_id
   let _petBusy = false;  // ペット保存中
+  let _petAdd = false;   // ペット追加中
 
   render(appEl, `
     <section class="section">
@@ -694,6 +695,96 @@ export async function renderCustomerDetail(appEl, query) {
       }
       return;
     }
+
+    // ===== ペット：追加開始 =====
+    if (a === "pet:add:open") {
+      if (_petBusy) return;
+      _petAdd = true;
+      _petEditId = "";
+      renderHost_(_detail);
+      return;
+    }
+
+    // ===== ペット：追加キャンセル =====
+    if (a === "pet:add:cancel") {
+      if (_petBusy) return;
+      _petAdd = false;
+      renderHost_(_detail);
+      return;
+    }
+
+    // ===== ペット：追加保存 =====
+    if (a === "pet:add:save") {
+      if (_petBusy) return;
+      const formEl = host.querySelector('form[data-el="petAddForm"]');
+      if (!formEl) return;
+
+      const name = getFormValue_(formEl, "name");
+      if (!name) {
+        toast({ title: "入力不足", message: "ペット名を入力してください。" });
+        return;
+      }
+
+      const valOrNull_ = (v) => {
+        if (v == null) return undefined;
+        const s = normStr_(v);
+        return (s === "") ? null : s;
+      };
+
+      const pet = {
+        name,
+        species: valOrNull_(getFormValue_(formEl, "species")),
+        breed: valOrNull_(getFormValue_(formEl, "breed")),
+        gender: valOrNull_(getFormValue_(formEl, "gender")),
+        birthdate: valOrNull_(getFormValue_(formEl, "birthdate")),
+        weight_kg: valOrNull_(getFormValue_(formEl, "weight_kg")),
+        rabies_vaccine_at: valOrNull_(getFormValue_(formEl, "rabies_vaccine_at")),
+        combo_vaccine_at: valOrNull_(getFormValue_(formEl, "combo_vaccine_at")),
+        health: valOrNull_(getFormValue_(formEl, "health")),
+        notes: valOrNull_(getFormValue_(formEl, "notes")),
+        hospital: valOrNull_(getFormValue_(formEl, "hospital")),
+        hospital_phone: valOrNull_(getFormValue_(formEl, "hospital_phone")),
+        is_active: true,
+      };
+
+      try {
+        _petBusy = true;
+        renderHost_(_detail);
+
+        const resUp = await callGas({
+          action: "upsertPets",
+          pets: {
+            customer_id: customerId,
+            pets: [pet],
+          }
+        }, idToken);
+        if (!resUp || resUp.ok === false) throw new Error("upsertPets failed");
+
+        toast({ title: "追加完了", message: "ペットを追加しました。" });
+
+        // 再取得
+        const res = await callGas({
+          action: "getCustomerDetail",
+          customer_id: customerId,
+          include_pets: true,
+          include_care_profile: true,
+        }, idToken);
+
+        const detail =
+          (res.customer || res.pets)
+            ? { customer: res.customer, pets: res.pets || [], careProfile: res.careProfile || null }
+            : extractCustomerDetail_(unwrapOne(res) || res);
+
+        _detail = detail;
+        _petAdd = false;
+        renderHost_(detail);
+      } catch (err) {
+        toast({ title: "追加失敗", message: err?.message || String(err) });
+      } finally {
+        _petBusy = false;
+      }
+      return;
+    }
   });
 
   // select の変更に追従して「その他詳細」欄を有効化
@@ -929,15 +1020,54 @@ export async function renderCustomerDetail(appEl, query) {
       `;
     }
 
-    const petsHtml = pets.length
-      ? `
-        ${pets.map(p => {
-          const pid = String(p?.id || p?.pet_id || "");
-          const petBody = (pid && _petEditId === pid) ? renderPetEdit_(p) : renderPetView_(p);
-          return petBody;
-        }).join("")}
-      `
-      : `<p class="p">ペット情報がありません。</p>`;
+    function renderPetAdd_() {
+      return `
+        <form data-el="petAddForm">
+          <div class="card card-warning">
+            <div class="row row-between">
+              <div class="p"><strong>ペットを追加</strong></div>
+              <div>
+                <button class="btn btn-ghost" type="button" data-action="pet:add:cancel">キャンセル</button>
+                <button class="btn" type="button" data-action="pet:add:save">追加</button>
+              </div>
+            </div>
+            <div class="p">
+              ${inputRow_(PET_FIELD_LABELS_JA.name, "name", "", { placeholder: "例：ゆべし" })}
+              ${selectRow_(PET_FIELD_LABELS_JA.species, "species", "", KEY_SPECIES_OPTIONS)}
+              ${inputRow_(PET_FIELD_LABELS_JA.breed, "breed", "", { placeholder: "例：柴犬" })}
+              ${selectRow_(PET_FIELD_LABELS_JA.gender, "gender", "", KEY_GENDER_OPTIONS)}
+              ${inputDateRow_(PET_FIELD_LABELS_JA.birthdate, "birthdate", "")}
+              ${inputRow_(PET_FIELD_LABELS_JA.weight_kg, "weight_kg", "", { placeholder: "例：4.2（kg）" })}
+
+              <div class="hr"></div>
+              ${inputDateRow_(PET_FIELD_LABELS_JA.rabies_vaccine_at, "rabies_vaccine_at", "")}
+              ${inputDateRow_(PET_FIELD_LABELS_JA.combo_vaccine_at, "combo_vaccine_at", "")}
+
+              <div class="hr"></div>
+              ${inputRow_(PET_FIELD_LABELS_JA.health, "health", "")}
+              <div class="p">
+                <div style="opacity:.85;"><strong>${escapeHtml(PET_FIELD_LABELS_JA.notes)}</strong></div>
+                <textarea class="input" name="notes" rows="3"></textarea>
+              </div>
+              ${inputRow_(PET_FIELD_LABELS_JA.hospital, "hospital", "")}
+              ${inputRow_(PET_FIELD_LABELS_JA.hospital_phone, "hospital_phone", "")}
+            </div>
+          </div>
+        </form>
+      `;
+    }
+
+    const petsHtml = `
+      ${pets.map(p => {
+        const pid = String(p?.id || p?.pet_id || "");
+        return (pid && _petEditId === pid) ? renderPetEdit_(p) : renderPetView_(p);
+      }).join("")}
+      ${_petAdd ? renderPetAdd_() : `
+        <div class="p">
+          <button class="btn" type="button" data-action="pet:add:open">＋ ペットを追加</button>
+        </div>
+      `}
+    `;
 
     const careHtml = cp ? `${renderCareProfile_(cp)}` : `<p class="p">お世話情報がありません。</p>`;
 
