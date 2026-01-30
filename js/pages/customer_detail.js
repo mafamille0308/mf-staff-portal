@@ -646,14 +646,16 @@ export async function renderCustomerDetail(appEl, query) {
         _petBusy = true;
         renderHost_(_detail);
 
-        const resUp = await callGas({
+        const resUp0 = await callGas({
           action: "upsertPets",
           pets: {
             customer_id: customerId,
             pets: [patchPet],
           }
         }, idToken);
-        if (!resUp || resUp.ok === false) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed");
+        const resUp = unwrapOne(resUp0) || resUp0; // envelope吸収
+        if (!resUp || resUp.success === false) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed");
+        if (resUp.ok !== true) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed (ok!=true)");
         if (resUp.ctx) setUser(resUp.ctx);
 
         toast({ title: "保存完了", message: "ペット情報を更新しました。" });
@@ -751,14 +753,17 @@ export async function renderCustomerDetail(appEl, query) {
         _petBusy = true;
         renderHost_(_detail);
 
-        const resUp = await callGas({
+        const resUp0 = await callGas({
           action: "upsertPets",
           pets: {
             customer_id: customerId,
             pets: [pet],
           }
         }, idToken);
-        if (!resUp || resUp.ok === false) throw new Error("upsertPets failed");
+        const resUp = unwrapOne(resUp0) || resUp0; // envelope吸収
+        if (!resUp || resUp.success === false) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed");
+        if (resUp.ok !== true) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed (ok!=true)");
+        if (resUp.ctx) setUser(resUp.ctx);
 
         toast({ title: "追加完了", message: "ペットを追加しました。" });
 
@@ -1063,7 +1068,7 @@ export async function renderCustomerDetail(appEl, query) {
         return (pid && _petEditId === pid) ? renderPetEdit_(p) : renderPetView_(p);
       }).join("")}
       ${_petAdd ? renderPetAdd_() : `
-        <div class="p">
+        <div class="p" style="margin-top:12px;">
           <button class="btn" type="button" data-action="pet:add:open">＋ ペットを追加</button>
         </div>
       `}
