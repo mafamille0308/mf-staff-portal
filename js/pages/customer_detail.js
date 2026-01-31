@@ -387,18 +387,6 @@ export async function renderCustomerDetail(appEl, query) {
     if (!btn) return;
     const a = btn.getAttribute("data-action");
 
-    if (a === "cd:enter-edit") {
-      if (_busy) return;
-      _mode = "edit";
-      if (_detail) renderHost_(_detail);
-      return;
-    }
-    if (a === "cd:cancel-edit") {
-      if (_busy) return;
-      _mode = "view";
-      if (_detail) renderHost_(_detail);
-      return;
-    }
     if (a === "cd:save") {
       if (_busy) return;
       if (!_detail || !_detail.customer) return;
@@ -590,6 +578,22 @@ export async function renderCustomerDetail(appEl, query) {
         blocker.close();
         // 失敗時は編集状態を維持し、入力DOMも維持されている（renderしない）
       }
+    }
+
+    // ===== 顧客：編集開始 =====
+    if (a === "cd:enter-edit") {
+      if (_busy) return;
+      _mode = "edit";
+      if (_detail) renderHost_(_detail);
+      return;
+    }
+
+    // ===== 顧客：キャンセル =====
+    if (a === "cd:cancel-edit") {
+      if (_busy) return;
+      _mode = "view";
+      if (_detail) renderHost_(_detail);
+      return;
     }
 
     // ===== ペット：編集開始 =====
@@ -863,52 +867,50 @@ export async function renderCustomerDetail(appEl, query) {
     }
   });
 
-  function renderHeaderActions_() {
-    if (_mode === "view") {
-      return `<button class="btn" type="button" data-action="cd:enter-edit" ${_busy ? "disabled" : ""}>編集</button>`;
-    }
+  // ===== 顧客表示：カード本文のみ（堅牢版）=====
+  // renderCustomerViewHtml_ は既存互換のため残し、card内構築用の本文関数を新設。
+  function renderCustomerViewBodyHtml_(c) {
     return `
-      <button class="btn btn-ghost" type="button" data-action="cd:cancel-edit" ${_busy ? "disabled" : ""}>キャンセル</button>
-      <button class="btn" type="button" data-action="cd:save" ${_busy ? "disabled" : ""}>保存</button>
+      <div class="p">
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.customer_id)}</strong>：${escapeHtml(displayOrDash(c.id || c.customer_id || customerId))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.name)}</strong>：${
+          escapeHtml(displayOrDash(c.name))
+        }${
+          (() => {
+            const sk = (c.surname_kana || c.surnameKana || "").trim();
+            const gk = (c.given_kana || c.givenKana || "").trim();
+            const kk = (sk + gk).trim();
+            return kk ? ` <span style="opacity:.75;">(${escapeHtml(kk)})</span>` : "";
+          })()
+        }</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.phone)}</strong>：${escapeHtml(displayOrDash(c.phone))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.emergency_phone)}</strong>：${escapeHtml(displayOrDash(c.emergency_phone || c.emergencyPhone))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.email)}</strong>：${escapeHtml(displayOrDash(c.email))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.billing_email)}</strong>：${escapeHtml(displayOrDash(c.billing_email || c.billingEmail))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.postal_code)}</strong>：${escapeHtml(displayOrDash(c.postal_code || (c.address_parts && c.address_parts.postal_code)))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.address_full)}</strong>：${escapeHtml(displayOrDash(c.address_full || c.addressFull || c.address))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.parking_info)}</strong>：${escapeHtml(displayOrDash(c.parking_info || c.parkingInfo))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.parking_fee_rule)}</strong>：${escapeHtml(displayOrDash(parkingFeeRuleLabel_(c.parking_fee_rule || c.parkingFeeRule)))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_rule)}</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule || c.keyPickupRule))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_rule_other)}</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule_other || c.keyPickupRuleOther))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_fee_rule)}</strong>：${escapeHtml(displayOrDash(keyFeeRuleLabel_(c.key_pickup_fee_rule || c.keyPickupFeeRule)))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_rule)}</strong>：${escapeHtml(displayOrDash(c.key_return_rule || c.keyReturnRule))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_rule_other)}</strong>：${escapeHtml(displayOrDash(c.key_return_rule_other || c.keyReturnRuleOther))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_fee_rule)}</strong>：${escapeHtml(displayOrDash(keyFeeRuleLabel_(c.key_return_fee_rule || c.keyReturnFeeRule)))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.key_location)}</strong>：${escapeHtml(displayOrDash(c.key_location || c.keyLocation))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.lock_no)}</strong>：${escapeHtml(displayOrDash(c.lock_no || c.lockNo))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.notes)}</strong>：${escapeHtml(displayOrDash(c.notes))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.stage)}</strong>：${escapeHtml(displayOrDash(c.stage))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.registered_date)}</strong>：${escapeHtml(displayOrDash(fmtDateJst(c.registered_date || c.registeredDate)))}</div>
+        <div><strong>${escapeHtml(FIELD_LABELS_JA.updated_at)}</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(c.updated_at || c.updatedAt)))}</div>
+      </div>
     `;
   }
 
   function renderCustomerViewHtml_(c) {
     return `
       <div class="card">
-        <div class="p">
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.customer_id)}</strong>：${escapeHtml(displayOrDash(c.id || c.customer_id || customerId))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.name)}</strong>：${
-            escapeHtml(displayOrDash(c.name))
-          }${
-            (() => {
-              const sk = (c.surname_kana || c.surnameKana || "").trim();
-              const gk = (c.given_kana || c.givenKana || "").trim();
-              const kk = (sk + gk).trim();
-              return kk ? ` <span style="opacity:.75;">(${escapeHtml(kk)})</span>` : "";
-            })()
-          }</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.phone)}</strong>：${escapeHtml(displayOrDash(c.phone))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.emergency_phone)}</strong>：${escapeHtml(displayOrDash(c.emergency_phone || c.emergencyPhone))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.email)}</strong>：${escapeHtml(displayOrDash(c.email))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.billing_email)}</strong>：${escapeHtml(displayOrDash(c.billing_email || c.billingEmail))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.postal_code)}</strong>：${escapeHtml(displayOrDash(c.postal_code || (c.address_parts && c.address_parts.postal_code)))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.address_full)}</strong>：${escapeHtml(displayOrDash(c.address_full || c.addressFull || c.address))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.parking_info)}</strong>：${escapeHtml(displayOrDash(c.parking_info || c.parkingInfo))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.parking_fee_rule)}</strong>：${escapeHtml(displayOrDash(parkingFeeRuleLabel_(c.parking_fee_rule || c.parkingFeeRule)))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_rule)}</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule || c.keyPickupRule))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_rule_other)}</strong>：${escapeHtml(displayOrDash(c.key_pickup_rule_other || c.keyPickupRuleOther))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_pickup_fee_rule)}</strong>：${escapeHtml(displayOrDash(keyFeeRuleLabel_(c.key_pickup_fee_rule || c.keyPickupFeeRule)))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_rule)}</strong>：${escapeHtml(displayOrDash(c.key_return_rule || c.keyReturnRule))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_rule_other)}</strong>：${escapeHtml(displayOrDash(c.key_return_rule_other || c.keyReturnRuleOther))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_return_fee_rule)}</strong>：${escapeHtml(displayOrDash(keyFeeRuleLabel_(c.key_return_fee_rule || c.keyReturnFeeRule)))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.key_location)}</strong>：${escapeHtml(displayOrDash(c.key_location || c.keyLocation))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.lock_no)}</strong>：${escapeHtml(displayOrDash(c.lock_no || c.lockNo))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.notes)}</strong>：${escapeHtml(displayOrDash(c.notes))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.stage)}</strong>：${escapeHtml(displayOrDash(c.stage))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.registered_date)}</strong>：${escapeHtml(displayOrDash(fmtDateJst(c.registered_date || c.registeredDate)))}</div>
-          <div><strong>${escapeHtml(FIELD_LABELS_JA.updated_at)}</strong>：${escapeHtml(displayOrDash(fmtDateTimeJst(c.updated_at || c.updatedAt)))}</div>
-        </div>
+        ${renderCustomerViewBodyHtml_(c)}
       </div>
     `;
   }
@@ -923,7 +925,14 @@ export async function renderCustomerDetail(appEl, query) {
 
     return `
       <form data-el="customerEditForm">
-        <div class="card">
+        <div class="card" style="margin-top:12px;">
+          <div class="row row-between">
+            <div class="p"><strong>${escapeHtml(displayOrDash(c.name))}</strong></div>
+            <div>
+              <button class="btn btn-ghost" type="button" data-action="cd:cancel-edit" ${_busy ? "disabled" : ""}>キャンセル</button>
+              <button class="btn" type="button" data-action="cd:save" ${_busy ? "disabled" : ""}>保存</button>
+            </div>
+          </div>
           <div class="p">
             ${inputRow_(FIELD_LABELS_JA.name_ro, "name_ro", c.name || "", { readonly: true, help: "編集は姓・名で行ってください。" })}
             ${inputRow_(FIELD_LABELS_JA.surname, "surname", c.surname || "", { placeholder: "例：佐藤" })}
@@ -994,7 +1003,20 @@ export async function renderCustomerDetail(appEl, query) {
     const pets = Array.isArray(detail.pets) ? detail.pets : [];
     const cp = detail.careProfile || null;
 
-    const customerHtml = (_mode === "edit") ? renderCustomerEditHtml_(c) : renderCustomerViewHtml_(c);
+    const customerHtml =
+      (_mode === "edit")
+        ? renderCustomerEditHtml_(c)
+        : `
+            <div style="margin-top:12px;">
+              <div class="card">
+                <div class="row row-between">
+                  <div class="p"><strong>${escapeHtml(displayOrDash(c.name))}</strong></div>
+                  <div><button class="btn" type="button" data-action="cd:enter-edit" ${_busy ? "disabled" : ""}>編集</button></div>
+                </div>
+                ${renderCustomerViewBodyHtml_(c)}
+              </div>
+            </div>
+          `;
 
     // ===== ペット =====
     function renderPetView_(p) {
@@ -1134,7 +1156,7 @@ export async function renderCustomerDetail(appEl, query) {
     const careHtml = cp ? `${renderCareProfile_(cp)}` : `<p class="p">お世話情報がありません。</p>`;
 
     host.innerHTML = `
-      ${section("顧客情報", customerHtml, renderHeaderActions_())}
+      ${section("顧客情報", customerHtml, "")}
       ${section("ペット情報", petsHtml, "")}
       ${section("お世話情報", careHtml, "")}
     `;
