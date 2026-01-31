@@ -50,7 +50,7 @@ const FIELD_LABELS_JA = {
   key_return_rule_other_detail: "鍵返却ルール（その他詳細）",
 };
 
-// ===== 顧客情報編集時の選択肢（申し込みフォームと統一）=====
+// ===== 顧客情報編集時の選択肢 =====
 const KEY_PICKUP_RULE_OPTIONS = ["継続保管", "郵送預かり", "メールボックス預かり", "鍵なし", "その他"];
 const KEY_RETURN_RULE_OPTIONS = ["継続保管", "ポスト返却", "メールボックス返却", "郵送返却", "鍵なし", "その他"];
 const KEY_LOCATION_OPTIONS    = ["顧客", "本部", "担当者", "鍵なし"];
@@ -84,6 +84,67 @@ const KEY_GENDER_OPTIONS  = ["オス", "オス（去勢）", "メス", "メス�
 function normStr_(v) {
   const s = fmt(v);
   return (s == null) ? "" : String(s).trim();
+}
+
+// ===== ブロッキング表示（保存中など）=====
+// ui.js の showModal は「確認」に使い、保存中はこの軽量オーバーレイで統一（入力DOMを壊さない）
+function openBlockingOverlay_({ title, bodyHtml, busyText = "保存中..." } = {}) {
+ const el = document.createElement("div");
+  el.setAttribute("data-el", "mfBlockingOverlay");
+  el.style.position = "fixed";
+  el.style.inset = "0";
+  el.style.zIndex = "9999";
+  el.style.background = "rgba(0,0,0,.35)";
+  el.style.display = "flex";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  el.style.padding = "16px";
+
+  // 既存UIのclassを流用（card/p/btn）し、見た目は馴染ませる
+  el.innerHTML = `
+    <div class="card" style="max-width:520px; width:100%; box-shadow:0 10px 30px rgba(0,0,0,.2);">
+      <div class="p">
+        <div class="p" style="margin:0 0 8px 0;"><strong>${escapeHtml(title || "")}</strong></div>
+        <div class="p" style="opacity:.9; margin:0 0 10px 0;">${bodyHtml || ""}</div>
+        <div class="hr"></div>
+        <div class="p" style="display:flex; gap:10px; align-items:center; opacity:.85;">
+          <span class="spinner" aria-hidden="true"></span>
+          <span data-el="busyText">${escapeHtml(busyText || "処理中...")}</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 簡易スピナー（CSS未依存）
+  const sp = el.querySelector(".spinner");
+  if (sp) {
+    sp.style.width = "16px";
+    sp.style.height = "16px";
+    sp.style.border = "2px solid rgba(0,0,0,.2)";
+    sp.style.borderTopColor = "rgba(0,0,0,.6)";
+    sp.style.borderRadius = "50%";
+    sp.style.animation = "mfSpin .9s linear infinite";
+    if (!document.getElementById("mfSpinStyle")) {
+      const st = document.createElement("style");
+      st.id = "mfSpinStyle";
+      st.textContent = `
+        @keyframes mfSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `;
+      document.head.appendChild(st);
+    }
+  }
+
+  document.body.appendChild(el);
+
+  return {
+    setBusyText(text) {
+      const t = el.querySelector('[data-el="busyText"]');
+      if (t) t.textContent = String(text || "");
+    },
+    close() {
+      try { el.remove(); } catch (_) {}
+    }
+  };
 }
 
 function inputDateRow_(label, name, value, { help = "", readonly = false } = {}) {
@@ -274,6 +335,24 @@ export async function renderCustomerDetail(appEl, query) {
   let _petEditId = "";   // 現在編集中の pet_id
   let _petBusy = false;  // ペット保存中
   let _petAdd = false;   // ペット追加中
+
+  // ===== 再取得（単一ソース）=====
+  async function refetchDetail_() {
+    const res = await callGas({
+      action: "getCustomerDetail",
+      customer_id: customerId,
+      include_pets: true,
+      include_care_profile: true,
+    }, idToken);
+    if (!res || res.success === false) throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
+    if (res.ctx) setUser(res.ctx);
+    const detail =
+      (res.customer || res.pets || res.careProfile || res.care_profile)
+        ? { customer: res.customer || null, pets: Array.isArray(res.pets) ? res.pets : [], careProfile: res.careProfile || res.care_profile || null }
+        : extractCustomerDetail_(unwrapOne(res) || res);
+    if (!detail || !detail.customer) throw new Error("再取得に失敗しました（detail.customer が空）");
+    return detail;
+  }
 
   render(appEl, `
     <section class="section">
@@ -481,49 +560,35 @@ export async function renderCustomerDetail(appEl, query) {
       });
       if (!ok) return;
 
+      // 保存開始で render しない（入力DOMを壊さない）
+      const blocker = openBlockingOverlay_({
+        title: "顧客情報を保存",
+        bodyHtml: `<div class="p">保存しています。完了するまでそのままお待ちください。</div>`,
+        busyText: "保存中...",
+      });
+
       try {
         _busy = true;
-        renderHost_(_detail); // ボタンdisabled反映
-
         const resUp = await callGas(patch, idToken);
         if (!resUp || resUp.ok === false) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertCustomer failed");
         if (resUp.ctx) setUser(resUp.ctx);
 
-        toast({ title: "保存完了", message: "顧客情報を更新しました。" });
-
-        // 再取得して表示＆cache更新（単一ソース：getCustomerDetail）
-        const res = await callGas({
-          action: "getCustomerDetail",
-          customer_id: customerId,
-          include_pets: true,
-          include_care_profile: true,
-        }, idToken);
-        if (!res || res.success === false) throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
-        if (res.ctx) setUser(res.ctx);
-
-        const detail =
-          (res.customer || res.pets || res.careProfile || res.care_profile)
-            ? {
-                customer: res.customer || null,
-                pets: Array.isArray(res.pets) ? res.pets : [],
-                careProfile: res.careProfile || res.care_profile || null,
-              }
-            : extractCustomerDetail_(unwrapOne(res) || res);
-
-        if (!detail || !detail.customer) throw new Error("再取得に失敗しました（detail.customer が空）");
+        // 再取得→反映
+        const detail = await refetchDetail_();
         _detail = detail;
         _mode = "view";
         renderHost_(detail);
 
-        try {
-          const cacheKey = KEY_CD_CACHE_PREFIX + String(customerId);
-          sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), detail }));
-        } catch (_) {}
+        // cache 更新
+        try { sessionStorage.setItem(KEY_CD_CACHE_PREFIX + String(customerId), JSON.stringify({ ts: Date.now(), detail })); } catch (_) {}
+
+        toast({ title: "保存完了", message: "顧客情報を更新しました。" });
       } catch (err) {
         toast({ title: "保存失敗", message: err?.message || String(err) });
       } finally {
         _busy = false;
-        if (_detail) renderHost_(_detail);
+        blocker.close();
+        // 失敗時は編集状態を維持し、入力DOMも維持されている（renderしない）
       }
     }
 
@@ -591,7 +656,7 @@ export async function renderCustomerDetail(appEl, query) {
       setIfChanged("gender", getFormValue_(formEl, "gender"), (p0.gender || p0.sex || ""));
 
       // 日付：date picker → yyyy-mm-dd を送る
-     setIfChanged("birthdate", getFormValue_(formEl, "birthdate"), (p0.birthdate || ""));
+      setIfChanged("birthdate", getFormValue_(formEl, "birthdate"), (p0.birthdate || ""));
       setIfChanged("rabies_vaccine_at", getFormValue_(formEl, "rabies_vaccine_at"), (p0.rabies_vaccine_at || ""));
       setIfChanged("combo_vaccine_at", getFormValue_(formEl, "combo_vaccine_at"), (p0.combo_vaccine_at || ""));
 
@@ -642,10 +707,15 @@ export async function renderCustomerDetail(appEl, query) {
       });
       if (!ok) return;
 
+      // 保存開始で render しない（編集中フォームを壊さない）
+      const blocker = openBlockingOverlay_({
+        title: "ペット情報を保存",
+        bodyHtml: `<div class="p">保存しています。完了するまでそのままお待ちください。</div>`,
+        busyText: "保存中...",
+      });
+
       try {
         _petBusy = true;
-        renderHost_(_detail);
-
         const resUp0 = await callGas({
           action: "upsertPets",
           pets: {
@@ -658,42 +728,21 @@ export async function renderCustomerDetail(appEl, query) {
         if (resUp.ok !== true) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed (ok!=true)");
         if (resUp.ctx) setUser(resUp.ctx);
 
-        toast({ title: "保存完了", message: "ペット情報を更新しました。" });
-
-        // 再取得して反映（単一ソース：getCustomerDetail）
-        const res = await callGas({
-          action: "getCustomerDetail",
-          customer_id: customerId,
-          include_pets: true,
-          include_care_profile: true,
-        }, idToken);
-        if (!res || res.success === false) throw new Error((res && (res.error || res.message)) || "getCustomerDetail failed");
-        if (res.ctx) setUser(res.ctx);
-
-        const detail =
-          (res.customer || res.pets || res.careProfile || res.care_profile)
-            ? {
-                customer: res.customer || null,
-                pets: Array.isArray(res.pets) ? res.pets : [],
-                careProfile: res.careProfile || res.care_profile || null,
-              }
-            : extractCustomerDetail_(unwrapOne(res) || res);
-
-        if (!detail || !detail.customer) throw new Error("再取得に失敗しました（detail.customer が空）");
+        const detail = await refetchDetail_();
         _detail = detail;
         _petEditId = "";
         renderHost_(detail);
 
         // cache 更新
-        try {
-          const cacheKey = KEY_CD_CACHE_PREFIX + String(customerId);
-          sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), detail }));
-        } catch (_) {}
+        try { sessionStorage.setItem(KEY_CD_CACHE_PREFIX + String(customerId), JSON.stringify({ ts: Date.now(), detail })); } catch (_) {}
+
+        toast({ title: "保存完了", message: "ペット情報を更新しました。" });
       } catch (err) {
         toast({ title: "保存失敗", message: err?.message || String(err) });
       } finally {
         _petBusy = false;
-        if (_detail) renderHost_(_detail);
+        blocker.close();
+        // 失敗時：編集フォームは維持（renderしない）
       }
       return;
     }
@@ -749,10 +798,23 @@ export async function renderCustomerDetail(appEl, query) {
         is_active: true,
       };
 
+      // 追加も確認→保存中ブロック（保存開始render禁止）
+      const ok = await showModal({
+        title: "ペットを追加",
+        bodyHtml: `<div class="p">この内容で追加します。よろしいですか？</div>`,
+        okText: "追加",
+        cancelText: "キャンセル",
+      });
+      if (!ok) return;
+
+      const blocker = openBlockingOverlay_({
+        title: "ペットを追加",
+        bodyHtml: `<div class="p">追加しています。完了するまでそのままお待ちください。</div>`,
+        busyText: "追加中...",
+      });
+
       try {
         _petBusy = true;
-        renderHost_(_detail);
-
         const resUp0 = await callGas({
           action: "upsertPets",
           pets: {
@@ -766,28 +828,19 @@ export async function renderCustomerDetail(appEl, query) {
         if (resUp.ok !== true) throw new Error((resUp && (resUp.error || resUp.message)) || "upsertPets failed (ok!=true)");
         if (resUp.ctx) setUser(resUp.ctx);
 
-        toast({ title: "追加完了", message: "ペットを追加しました。" });
-
-        // 再取得
-        const res = await callGas({
-          action: "getCustomerDetail",
-          customer_id: customerId,
-          include_pets: true,
-          include_care_profile: true,
-        }, idToken);
-
-        const detail =
-          (res.customer || res.pets)
-            ? { customer: res.customer, pets: res.pets || [], careProfile: res.careProfile || null }
-            : extractCustomerDetail_(unwrapOne(res) || res);
-
+        const detail = await refetchDetail_();
         _detail = detail;
         _petAdd = false;
         renderHost_(detail);
+
+        try { sessionStorage.setItem(KEY_CD_CACHE_PREFIX + String(customerId), JSON.stringify({ ts: Date.now(), detail })); } catch (_) {}
+
+        toast({ title: "追加完了", message: "ペットを追加しました。" });
       } catch (err) {
         toast({ title: "追加失敗", message: err?.message || String(err) });
       } finally {
         _petBusy = false;
+        blocker.close();
       }
       return;
     }
@@ -985,7 +1038,7 @@ export async function renderCustomerDetail(appEl, query) {
 
       return `
         <form data-el="petEditForm" data-pet-id="${escapeHtml(pid)}">
-         <div class="card">
+         <div class="card" style="margin-top:12px;">
             <div class="row row-between">
               <div class="p"><strong>${escapeHtml(displayOrDash(p.name || p.pet_name))}</strong></div>
               <div>
@@ -1029,7 +1082,7 @@ export async function renderCustomerDetail(appEl, query) {
     function renderPetAdd_() {
       return `
         <form data-el="petAddForm">
-          <div class="card card-warning">
+          <div class="card card-warning" style="margin-top:12px;">
             <div class="row row-between">
               <div class="p"><strong>ペットを追加</strong></div>
               <div>
@@ -1064,9 +1117,12 @@ export async function renderCustomerDetail(appEl, query) {
     }
 
     const petsHtml = `
-      ${pets.map(p => {
+      ${pets.map((p, i) => {
         const pid = String(p?.id || p?.pet_id || "");
-        return (pid && _petEditId === pid) ? renderPetEdit_(p) : renderPetView_(p);
+        const inner = (pid && _petEditId === pid) ? renderPetEdit_(p) : renderPetView_(p);
+        // view/edit どちらでもブロック間の余白を統一
+        const mt = (i === 0) ? 0 : 12;
+        return `<div style="margin-top:${mt}px;">${inner}</div>`;
       }).join("")}
       ${_petAdd ? renderPetAdd_() : `
         <div class="p" style="margin-top:12px;">
