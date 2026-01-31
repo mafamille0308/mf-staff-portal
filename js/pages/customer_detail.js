@@ -757,6 +757,7 @@ export async function renderCustomerDetail(appEl, query) {
           action: "upsertPets",
           pets: {
             customer_id: customerId,
+            create_only: true, // 新規追加モード
             pets: [pet],
           }
         }, idToken);
