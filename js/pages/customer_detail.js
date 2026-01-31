@@ -191,6 +191,13 @@ function rawToggle_(rawText) {
   `;
 }
 
+function customerKanaHtml_(c) {
+  const sk = (c?.surname_kana || c?.surnameKana || "").trim();
+  const gk = (c?.given_kana || c?.givenKana || "").trim();
+  const kk = (sk + gk).trim();
+  return kk ? ` <span style="opacity:.75;">(${escapeHtml(kk)})</span>` : "";
+}
+
 function renderCareProfile_(cp) {
   if (!cp || typeof cp !== "object") return `<p class="p">お世話情報がありません。</p>`;
 
@@ -868,21 +875,10 @@ export async function renderCustomerDetail(appEl, query) {
   });
 
   // ===== 顧客表示：カード本文のみ（堅牢版）=====
-  // renderCustomerViewHtml_ は既存互換のため残し、card内構築用の本文関数を新設。
   function renderCustomerViewBodyHtml_(c) {
     return `
       <div class="p">
         <div><strong>${escapeHtml(FIELD_LABELS_JA.customer_id)}</strong>：${escapeHtml(displayOrDash(c.id || c.customer_id || customerId))}</div>
-        <div><strong>${escapeHtml(FIELD_LABELS_JA.name)}</strong>：${
-          escapeHtml(displayOrDash(c.name))
-        }${
-          (() => {
-            const sk = (c.surname_kana || c.surnameKana || "").trim();
-            const gk = (c.given_kana || c.givenKana || "").trim();
-            const kk = (sk + gk).trim();
-            return kk ? ` <span style="opacity:.75;">(${escapeHtml(kk)})</span>` : "";
-          })()
-        }</div>
         <div><strong>${escapeHtml(FIELD_LABELS_JA.phone)}</strong>：${escapeHtml(displayOrDash(c.phone))}</div>
         <div><strong>${escapeHtml(FIELD_LABELS_JA.emergency_phone)}</strong>：${escapeHtml(displayOrDash(c.emergency_phone || c.emergencyPhone))}</div>
         <div><strong>${escapeHtml(FIELD_LABELS_JA.email)}</strong>：${escapeHtml(displayOrDash(c.email))}</div>
@@ -907,14 +903,6 @@ export async function renderCustomerDetail(appEl, query) {
     `;
   }
 
-  function renderCustomerViewHtml_(c) {
-    return `
-      <div class="card">
-        ${renderCustomerViewBodyHtml_(c)}
-      </div>
-    `;
-  }
-
   function renderCustomerEditHtml_(c) {
     const ap = c.address_parts || {};
     const pickup = normalizeChoice_(c.key_pickup_rule || c.keyPickupRule, KEY_PICKUP_RULE_OPTIONS);
@@ -927,7 +915,7 @@ export async function renderCustomerDetail(appEl, query) {
       <form data-el="customerEditForm">
         <div class="card" style="margin-top:12px;">
           <div class="row row-between">
-            <div class="p"><strong>${escapeHtml(displayOrDash(c.name))}</strong></div>
+            <div class="p"><strong>${escapeHtml(displayOrDash(c.name))}</strong>${customerKanaHtml_(c)}</div>
             <div>
               <button class="btn btn-ghost" type="button" data-action="cd:cancel-edit" ${_busy ? "disabled" : ""}>キャンセル</button>
               <button class="btn" type="button" data-action="cd:save" ${_busy ? "disabled" : ""}>保存</button>
@@ -1010,7 +998,7 @@ export async function renderCustomerDetail(appEl, query) {
             <div style="margin-top:12px;">
               <div class="card">
                 <div class="row row-between">
-                  <div class="p"><strong>${escapeHtml(displayOrDash(c.name))}</strong></div>
+                  <div class="p"><strong>${escapeHtml(displayOrDash(c.name))}</strong>${customerKanaHtml_(c)}</div>
                   <div><button class="btn" type="button" data-action="cd:enter-edit" ${_busy ? "disabled" : ""}>編集</button></div>
                 </div>
                 ${renderCustomerViewBodyHtml_(c)}
