@@ -1031,7 +1031,7 @@ export async function renderCustomerDetail(appEl, query) {
       const inactive = !_showInactivePets ? false : !isPetActive_(p);
       const cardStyle = inactive ? ' style="opacity:.55;"' : "";
       return `
-        <div class="card">
+        <div class="card"${cardStyle}>
           <div class="row row-between">
             <div class="p"><strong>${escapeHtml(displayOrDash(p.name || p.pet_name))}</strong></div>
             <div>
@@ -1102,9 +1102,10 @@ export async function renderCustomerDetail(appEl, query) {
               ${inputRow_(PET_FIELD_LABELS_JA.hospital_phone, "hospital_phone", (p.hospital_phone || ""), { placeholder: "例：0221234567" })}
 
               <div class="hr"></div>
-              <label class="p" style="display:flex; gap:8px; align-items:center;">
+              <div class="p"><strong>${escapeHtml(PET_FIELD_LABELS_JA.is_active)}</strong></div>
+              <label class="p" style="display:flex; gap:8px; align-items:center; margin-top:6px;">
                 <input type="checkbox" name="is_active" ${isActiveCur ? "checked" : ""}/>
-                <span><strong>${escapeHtml(PET_FIELD_LABELS_JA.is_active)}</strong></span>
+                <span>チェックオンで有効</span>
               </label>
             </div>
           </div>
