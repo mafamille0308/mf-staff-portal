@@ -74,7 +74,7 @@ const PET_FIELD_LABELS_JA = {
   hospital_phone: "病院電話",
   registered_date: "登録日",
   updated_at: "更新日時",
-  is_active: "有効",
+  is_active: "ステータス",
 };
 
 // ===== ペット情報編集時の選択肢 =====
@@ -342,6 +342,7 @@ export async function renderCustomerDetail(appEl, query) {
   let _petEditId = "";   // 現在編集中の pet_id
   let _petBusy = false;  // ペット保存中
   let _petAdd = false;   // ペット追加中
+  let _showInactivePets = false; // デフォルトは有効のみ表示
 
   // ===== 再取得（単一ソース）=====
   async function refetchDetail_() {
@@ -859,6 +860,13 @@ export async function renderCustomerDetail(appEl, query) {
 
   // select の変更に追従して「その他詳細」欄を有効化
   host.addEventListener("change", (e) => {
+    // ===== ペット表示オプション =====
+    if (e.target && e.target.matches('input[name="show_inactive_pets"]')) {
+      _showInactivePets = !!e.target.checked;
+      if (_detail) renderHost_(_detail);
+      return;
+    }
+
     if (_mode !== "edit") return;
     const t = e.target;
     if (!t) return;
@@ -986,9 +994,20 @@ export async function renderCustomerDetail(appEl, query) {
     `;
   }
 
+  // ペット active 判定ヘルパ  
+  function isPetActive_(p) {
+    const v = p?.is_active;
+    if (v === false) return false;
+    if (v == null || v === "") return true; // 未設定は有効扱い
+    const s = String(v).toLowerCase();
+    if (s === "false") return false;
+    return true;
+  }
+
   function renderHost_(detail) {
     const c = detail.customer || {};
-    const pets = Array.isArray(detail.pets) ? detail.pets : [];
+    const petsAll = Array.isArray(detail.pets) ? detail.pets : [];
+    const pets = _showInactivePets ? petsAll : petsAll.filter(isPetActive_);
     const cp = detail.careProfile || null;
 
     const customerHtml =
@@ -1009,6 +1028,8 @@ export async function renderCustomerDetail(appEl, query) {
     // ===== ペット =====
     function renderPetView_(p) {
       const pid = String(p?.id || p?.pet_id || "");
+      const inactive = !_showInactivePets ? false : !isPetActive_(p);
+      const cardStyle = inactive ? ' style="opacity:.55;"' : "";
       return `
         <div class="card">
           <div class="row row-between">
@@ -1045,10 +1066,12 @@ export async function renderCustomerDetail(appEl, query) {
       const species = normalizeChoice_(p.species || p.type || p.pet_type, KEY_SPECIES_OPTIONS);
       const gender  = normalizeChoice_(p.gender || p.sex, KEY_GENDER_OPTIONS);
       const isActiveCur = (p.is_active === "" || p.is_active == null) ? true : !!p.is_active;
+      const inactive = !_showInactivePets ? false : !isPetActive_(p);
+      const cardStyle = inactive ? ' style="margin-top:12px; opacity:.55;"' : ' style="margin-top:12px;"';
 
       return `
         <form data-el="petEditForm" data-pet-id="${escapeHtml(pid)}">
-         <div class="card" style="margin-top:12px;">
+         <div class="card"${cardStyle}>
             <div class="row row-between">
               <div class="p"><strong>${escapeHtml(displayOrDash(p.name || p.pet_name))}</strong></div>
               <div>
@@ -1141,11 +1164,18 @@ export async function renderCustomerDetail(appEl, query) {
       `}
     `;
 
+    const petActionsHtml = `
+      <label class="p text-sm" style="display:flex; gap:8px; align-items:center; margin:0;">
+        <input type="checkbox" name="show_inactive_pets" ${_showInactivePets ? "checked" : ""}/>
+        <span>無効も表示</span>
+      </label>
+    `;
+
     const careHtml = cp ? `${renderCareProfile_(cp)}` : `<p class="p">お世話情報がありません。</p>`;
 
     host.innerHTML = `
       ${section("顧客情報", customerHtml, "")}
-      ${section("ペット情報", petsHtml, "")}
+      ${section("ペット情報", petsHtml, petActionsHtml)}
       ${section("お世話情報", careHtml, "")}
     `;
 
