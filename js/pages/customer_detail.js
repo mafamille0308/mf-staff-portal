@@ -229,7 +229,7 @@ function renderCareProfile_(cp) {
 
 function section(title, bodyHtml, actionsHtml) {
   return `
-    <div style="margin-top:12px;"></div>
+    <div style="margin-top:18px;"></div>
     <div class="row row-between">
       <h2 class="h2">${escapeHtml(title)}</h2>
       <div>${actionsHtml || ""}</div>
