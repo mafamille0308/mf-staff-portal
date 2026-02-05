@@ -167,6 +167,7 @@ function lineBlock_(label, text) {
   const s = normStr_(text);
   if (!s) return "";
   return `
+    <div style="margin-top:12px;"></div>
     <div class="p"><strong>${escapeHtml(label)}</strong></div>
     <div class="card">
       <div class="p" style="white-space:pre-wrap;">${escapeHtml(s)}</div>
@@ -228,6 +229,7 @@ function renderCareProfile_(cp) {
 
 function section(title, bodyHtml, actionsHtml) {
   return `
+    <div style="margin-top:12px;"></div>
     <div class="row row-between">
       <h2 class="h2">${escapeHtml(title)}</h2>
       <div>${actionsHtml || ""}</div>
