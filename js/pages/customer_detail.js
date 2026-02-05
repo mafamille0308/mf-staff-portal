@@ -886,7 +886,6 @@ export async function renderCustomerDetail(appEl, query) {
   function renderCustomerViewBodyHtml_(c) {
     return `
       <div class="p">
-        <div><strong>${escapeHtml(FIELD_LABELS_JA.customer_id)}</strong>：${escapeHtml(displayOrDash(c.id || c.customer_id || customerId))}</div>
         <div><strong>${escapeHtml(FIELD_LABELS_JA.phone)}</strong>：${escapeHtml(displayOrDash(c.phone))}</div>
         <div><strong>${escapeHtml(FIELD_LABELS_JA.emergency_phone)}</strong>：${escapeHtml(displayOrDash(c.emergency_phone || c.emergencyPhone))}</div>
         <div><strong>${escapeHtml(FIELD_LABELS_JA.email)}</strong>：${escapeHtml(displayOrDash(c.email))}</div>
@@ -930,7 +929,6 @@ export async function renderCustomerDetail(appEl, query) {
             </div>
           </div>
           <div class="p">
-            ${inputRow_(FIELD_LABELS_JA.name_ro, "name_ro", c.name || "", { readonly: true, help: "編集は姓・名で行ってください。" })}
             ${inputRow_(FIELD_LABELS_JA.surname, "surname", c.surname || "", { placeholder: "例：佐藤" })}
             ${inputRow_(FIELD_LABELS_JA.given, "given", c.given || "", { placeholder: "例：花子" })}
             ${inputRow_(FIELD_LABELS_JA.surname_kana, "surname_kana", c.surname_kana || c.surnameKana || "", { placeholder: "例：さとう" })}
@@ -941,8 +939,7 @@ export async function renderCustomerDetail(appEl, query) {
             ${inputRow_(FIELD_LABELS_JA.billing_email, "billing_email", c.billing_email || c.billingEmail || "", { type: "email", placeholder: "例：billing@gmail.com" })}
 
             <div class="hr"></div>
-            <div class="p"><strong>住所（分割編集）</strong></div>
-            ${inputRow_(FIELD_LABELS_JA.address_full_ro, "address_full_ro", (c.address_full || c.addressFull || c.address || ""), { readonly: true })}
+            <div class="p"><strong>住所</strong></div>
             ${inputRow_(FIELD_LABELS_JA.postal_code, "postal_code", (c.postal_code || ap.postal_code || ""), { placeholder: "例：9800000" })}
             ${inputRow_(FIELD_LABELS_JA.prefecture, "prefecture", (c.prefecture || ap.prefecture || ""), { placeholder: "例：宮城県" })}
             ${inputRow_(FIELD_LABELS_JA.city, "city", (c.city || ap.city || ""), { placeholder: "例：仙台市青葉区" })}
@@ -1039,8 +1036,6 @@ export async function renderCustomerDetail(appEl, query) {
             </div>
           </div>
           <div class="p">
-            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.pet_id)}</strong>：${escapeHtml(displayOrDash(p.id || p.pet_id))}</div>
-            <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.customer_id)}</strong>：${escapeHtml(displayOrDash(p.customer_id || customerId))}</div>
             <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.species)}</strong>：${escapeHtml(displayOrDash(p.species || p.type || p.pet_type))}</div>
             <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.breed)}</strong>：${escapeHtml(displayOrDash(p.breed))}</div>
             <div><strong>${escapeHtml(PET_FIELD_LABELS_JA.gender)}</strong>：${escapeHtml(displayOrDash(p.gender))}</div>
@@ -1080,17 +1075,16 @@ export async function renderCustomerDetail(appEl, query) {
               </div>
             </div>
             <div class="p">
-              ${inputRow_(PET_FIELD_LABELS_JA.pet_id, "pet_id_ro", (p.id || p.pet_id || ""), { readonly: true })}
               ${inputRow_(PET_FIELD_LABELS_JA.name, "name", (p.name || p.pet_name || ""), { placeholder: "例：ゆべし" })}
               ${selectRow_(PET_FIELD_LABELS_JA.species, "species", species, KEY_SPECIES_OPTIONS)}
               ${inputRow_(PET_FIELD_LABELS_JA.breed, "breed", (p.breed || ""), { placeholder: "例：柴犬 / 雑種" })}
               ${selectRow_(PET_FIELD_LABELS_JA.gender, "gender", gender, KEY_GENDER_OPTIONS)}
-              ${inputDateRow_(PET_FIELD_LABELS_JA.birthdate, "birthdate", (p.birthdate || ""), { help: "未設定の場合は空欄でOK" })}
+              ${inputDateRow_(PET_FIELD_LABELS_JA.birthdate, "birthdate", (p.birthdate || ""))}
               ${inputRow_(PET_FIELD_LABELS_JA.weight_kg, "weight_kg", (p.weight_kg || ""), { placeholder: "例：4.2" })}
 
               <div class="hr"></div>
-              ${inputDateRow_(PET_FIELD_LABELS_JA.rabies_vaccine_at, "rabies_vaccine_at", (p.rabies_vaccine_at || ""), { help: "yyyy-mm-dd" })}
-              ${inputDateRow_(PET_FIELD_LABELS_JA.combo_vaccine_at, "combo_vaccine_at", (p.combo_vaccine_at || ""), { help: "yyyy-mm-dd" })}
+              ${inputDateRow_(PET_FIELD_LABELS_JA.rabies_vaccine_at, "rabies_vaccine_at", (p.rabies_vaccine_at || ""))}
+              ${inputDateRow_(PET_FIELD_LABELS_JA.combo_vaccine_at, "combo_vaccine_at", (p.combo_vaccine_at || ""))}
 
               <div class="hr"></div>
               ${inputRow_(PET_FIELD_LABELS_JA.health, "health", (p.health || ""), { placeholder: "健康上の注意など" })}
