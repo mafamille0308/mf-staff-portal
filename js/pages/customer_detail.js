@@ -1011,7 +1011,7 @@ export async function renderCustomerDetail(appEl, query) {
       (_mode === "edit")
         ? renderCustomerEditHtml_(c)
         : `
-            <div style="margin-top:12px;">
+            <div>
               <div class="card">
                 <div class="row row-between">
                   <div class="p"><strong>${escapeHtml(displayOrDash(c.name))}</strong>${customerKanaHtml_(c)}</div>
