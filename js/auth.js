@@ -105,10 +105,36 @@ export function initGoogleLogin({ containerId = "app", onLogin } = {}) {
         return;
       }
 
-      setIdToken(token); // 永続化
+      // NOTE: ここでは token を保存しない（= ログイン成立させない）。
+      // GAS側で Staffs.login_email に登録済みか（在籍/有効か）を確認し、
+      // OK のときだけ setIdToken する。
+      toast({ title: "認可確認中", message: "アカウント権限を確認しています…" });
 
-      toast({ title: "ログイン完了", message: "認証トークンを取得しました。" });
-      if (typeof onLogin === "function") onLogin(token);
+      (async () => {
+        try {
+          // 循環import回避（api.js は auth.js を参照しているため動的import）
+          const mod = await import("./api.js");
+          const callGas = mod && mod.callGas;
+          if (typeof callGas !== "function") throw new Error("callGas is not available");
+
+          const res = await callGas({ action: "getMe" }, token);
+          if (!res || res.success === false) {
+            throw new Error((res && (res.error || res.message)) || "Not authorized");
+          }
+
+          // OK：ここで初めてログイン確定
+          setIdToken(token);
+          toast({ title: "ログイン完了", message: "ログインしました。" });
+          if (typeof onLogin === "function") onLogin(token);
+        } catch (e) {
+          // NG：保存しない（= 未ログインのまま）
+          try { clearIdToken(); } catch (_) {}
+          toast({
+            title: "ログイン不可",
+            message: "このアカウントは利用許可がありません（Staffs.login_email未登録、または無効）。"
+          });
+        }
+      })();
     },
   });
 

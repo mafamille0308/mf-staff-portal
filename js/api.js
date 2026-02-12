@@ -66,7 +66,7 @@ export async function callGas(payload, idToken) {
       detail: { request_id: rid, response: json },
     });
   }
-  if (json && json.ok === false) {
+  if (json && (json.ok === false || json.success === false)) {
     // 認証エラーならtokenを破棄し、再ログインに寄せる
     const msg = String(json.error || "");
     if (msg.includes("Invalid id_token") || msg.includes("invalid_token")) {
