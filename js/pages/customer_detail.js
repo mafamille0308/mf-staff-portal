@@ -191,6 +191,69 @@ function rawToggle_(rawText) {
   `;
 }
 
+function renderCareProfileViewCard_(cp) {
+  if (!cp || typeof cp !== "object") return `<p class="p">お世話情報がありません。</p>`;
+
+  // 互換吸収（段階移行を許容）
+  const warnings = pickFirst_(cp, ["warnings", "注意事項"]);
+  const raw      = pickFirst_(cp, ["content_raw", "内容原本"]);
+  const content  = pickFirst_(cp, ["content", "内容"]);
+  const food     = pickFirst_(cp, ["food_care", "ごはん", "ごはんのお世話"]);
+  const toilet   = pickFirst_(cp, ["toilet_care", "トイレ", "トイレのお世話"]);
+  const walk     = pickFirst_(cp, ["walk_care", "散歩", "散歩のお世話"]);
+  const play     = pickFirst_(cp, ["play_care", "遊び", "遊び・お散歩のお世話"]);
+  const other    = pickFirst_(cp, ["other_care", "その他", "室内環境・その他", "environment_other"]);
+
+  // どれも無い場合は空扱い
+  const anyStructured = warnings || content || food || toilet || walk || play || other;
+  const any = anyStructured || raw;
+  if (!any) return `<p class="p">お世話情報がありません。</p>`;
+
+  const block_ = (label, text) => {
+    const s = normStr_(text);
+    if (!s) return "";
+    return `
+      <div style="margin-top:12px;">
+        <div style="opacity:.85; margin-bottom:4px;"><strong>${escapeHtml(label)}</strong></div>
+        <div style="white-space:pre-wrap;">${escapeHtml(s)}</div>
+      </div>
+    `;
+  };
+
+  // 原本は “必要時のみ” 出す（＝普段はノイズになりやすい）
+  // 例：構造化項目が空で raw だけある場合 / または raw がある場合に折りたたみで表示
+  const rawDetails_ = (rawText) => {
+    const s = normStr_(rawText);
+    if (!s) return "";
+    return `
+      <div style="margin-top:14px;">
+        <details class="details">
+          <summary class="p" style="cursor:pointer; user-select:none; margin:0;">
+            <strong>カルテ原本（OCR）</strong>（必要時のみ確認）
+          </summary>
+          <div class="card" style="margin-top:8px;">
+            <div class="p" style="white-space:pre-wrap;">${escapeHtml(s)}</div>
+          </div>
+        </details>
+      </div>
+    `;
+  };
+
+  return `
+    <div class="card" style="margin-top:12px;">
+      <div class="p">
+        ${block_("注意事項", warnings)}
+        ${block_("ごはん", food)}
+        ${block_("トイレ", toilet)}
+        ${block_("散歩", walk)}
+        ${block_("遊び", play)}
+        ${block_("その他", other)}
+        ${(!anyStructured && raw) ? rawDetails_(raw) : (raw ? rawDetails_(raw) : "")}
+      </div>
+    </div>
+  `;
+}
+
 function customerKanaHtml_(c) {
   const sk = (c?.surname_kana || c?.surnameKana || "").trim();
   const gk = (c?.given_kana || c?.givenKana || "").trim();
@@ -1153,7 +1216,7 @@ export async function renderCustomerDetail(appEl, query) {
         return `<div style="margin-top:${mt}px;">${inner}</div>`;
       }).join("")}
       ${_petAdd ? renderPetAdd_() : `
-        <div class="p" style="margin-top:12px;">
+        <div class="p" style="margin-top:12px; display:flex; justify-content:flex-end;">
           <button class="btn" type="button" data-action="pet:add:open">＋ ペットを追加</button>
         </div>
       `}
@@ -1166,7 +1229,9 @@ export async function renderCustomerDetail(appEl, query) {
       </label>
     `;
 
-    const careHtml = cp ? `${renderCareProfile_(cp)}` : `<p class="p">お世話情報がありません。</p>`;
+    const careHtml = cp
+      ? (_mode === "view" ? renderCareProfileViewCard_(cp) : renderCareProfile_(cp))
+      : `<p class="p">お世話情報がありません。</p>`;
 
     host.innerHTML = `
       ${section("顧客情報", customerHtml, "")}
