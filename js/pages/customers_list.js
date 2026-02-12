@@ -15,6 +15,25 @@ function norm_(v) {
   return String(v || "").trim().toLowerCase();
 }
 
+// ===== kana normalize（ひらがな検索対応）=====
+// - 濁点等はそのまま
+// - カタカナ→ひらがな
+// - 空白除去（姓/名の間の揺れ対策）
+function toHiragana_(s) {
+  const str = String(s || "");
+  let out = "";
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    // Katakana: U+30A1..U+30F6 → Hiragana: U+3041..U+3096 （-0x60）
+    if (code >= 0x30A1 && code <= 0x30F6) out += String.fromCharCode(code - 0x60);
+    else out += str[i];
+  }
+  return out;
+}
+function normKana_(v) {
+  return toHiragana_(String(v || "")).trim().toLowerCase().replace(/\s+/g, "");
+}
+
 function safeParseJson_(s) {
   try { return JSON.parse(String(s || "")); } catch (_) { return null; }
 }
@@ -50,15 +69,28 @@ function saveCache_(key, customers) {
 
 function filter_(list, q) {
   const nq = norm_(q);
+  const nkq = normKana_(q);
   if (!nq) return list;
 
   return list.filter(c => {
     const name = norm_(c.name);
+    const nameKana = normKana_(c.name_kana || c.kana || "");
+    const surnameKana = normKana_(c.surname_kana || "");
+    const givenKana = normKana_(c.given_kana || "");
+    const fullKana = (surnameKana + givenKana).trim();
     const addr = norm_(c.address);
     const phone = norm_(c.phone);
     const pets = Array.isArray(c.pet_names) ? c.pet_names.map(norm_).join(" ") : "";
     const cid = norm_(c.customer_id);
-    return name.includes(nq) || addr.includes(nq) || phone.includes(nq) || pets.includes(nq) || cid.includes(nq);
+    return (
+      name.includes(nq) ||
+      addr.includes(nq) ||
+      phone.includes(nq) ||
+      pets.includes(nq) ||
+      cid.includes(nq) ||
+      // ひらがな/かな検索（DBにかながある前提）
+      (nkq && (nameKana.includes(nkq) || fullKana.includes(nkq) || surnameKana.includes(nkq) || givenKana.includes(nkq)))
+    );
   });
 }
 
@@ -116,6 +148,11 @@ async function fetchCustomers_(state, query) {
   return list.map(x => ({
     customer_id: String(x.customer_id || "").trim(),
     name: String(x.name || "").trim(),
+    // かな（姓名）: GAS側が返していれば拾う。未返却でも落ちない。
+    surname_kana: String(x.surname_kana || x.surnameKana || "").trim(),
+    given_kana: String(x.given_kana || x.givenKana || "").trim(),
+    // 一体かな（もしあれば）
+    name_kana: String(x.name_kana || x.nameKana || "").trim(),
     phone: String(x.phone || "").trim(),
     address: String(x.address || "").trim(),
     pet_names: Array.isArray(x.pet_names) ? x.pet_names : [],
@@ -137,28 +174,37 @@ export async function renderCustomersList(appEl, query) {
     <section class="section">
       <div class="row row-between">
         <h1 class="h1">担当顧客一覧</h1>
-        <button class="btn btn-ghost" type="button" data-action="refresh">更新</button>
+        <button class="btn btn-ghost" type="button" data-action="list">担当顧客一覧</button>
       </div>
 
       <div class="row" style="margin-top:10px;">
         <input id="cfKeyword" class="input" type="text" inputmode="search"
           placeholder="検索（顧客名/住所/電話/ペット/ID）" />
+          <button class="btn" type="button" data-action="search">検索</button>
         <button class="btn btn-ghost" type="button" data-action="clear-keyword">クリア</button>
       </div>
 
       <div class="hr"></div>
-      <div id="customersList"><p class="p">読み込み中...</p></div>
+      <div id="customersList">
+        <p class="p" style="opacity:.85;">
+          顧客名を検索してください（ひらがな可）。<br>
+          一覧が必要な場合は「担当顧客一覧」を押してください。
+        </p>
+      </div>
     </section>
   `);
 
   const listEl = appEl.querySelector("#customersList");
   const kwEl = appEl.querySelector("#cfKeyword");
-  const refreshBtn = appEl.querySelector('[data-action="refresh"]');
+  const listBtn = appEl.querySelector('[data-action="list"]');
+  const searchBtn = appEl.querySelector('[data-action="search"]');
 
   if (!listEl) return;
   if (kwEl) kwEl.value = state.keyword;
 
   let customersAll = [];
+  let _fetched = false;      // 一度でも listMyCustomers を叩いたか
+  let _hasSearched = false;  // 検索操作をしたか（空画面回避/文言制御）
 
   // ===== スクロール復元（詳細→一覧の体感改善）=====
   const restoreScrollOnce_ = () => {
@@ -180,6 +226,17 @@ export async function renderCustomersList(appEl, query) {
   };
 
   const applyAndRender_ = () => {
+    // 未検索・未一覧の初期状態はガイドを維持
+    if (!_fetched && !_hasSearched) {
+      listEl.innerHTML = `
+        <p class="p" style="opacity:.85;">
+          まずは検索してください（かな：ひらがな入力でもヒットします）。<br>
+          一覧が必要な場合は「担当顧客一覧」を押してください。
+        </p>
+      `;
+      return;
+    }
+
     const filtered = filter_(customersAll, state.keyword);
 
     if (!filtered.length) {
@@ -202,21 +259,25 @@ export async function renderCustomersList(appEl, query) {
       const cached = loadCache_(ck);
       if (cached) {
         customersAll = cached;
+        _fetched = true;
         applyAndRender_();
         return;
       }
     }
 
     try {
-      if (refreshBtn) refreshBtn.disabled = true;
+      if (listBtn) listBtn.disabled = true;
+      if (searchBtn) searchBtn.disabled = true;
       customersAll = await fetchCustomers_(state, query);
       saveCache_(ck, customersAll);
+      _fetched = true;
       applyAndRender_();
     } catch (e) {
       toast({ title: "取得失敗", message: e?.message || String(e) });
       listEl.innerHTML = `<p class="p">取得に失敗しました。</p>`;
     } finally {
-      if (refreshBtn) refreshBtn.disabled = false;
+      if (listBtn) listBtn.disabled = false;
+      if (searchBtn) searchBtn.disabled = false;
     }
   };
 
@@ -225,13 +286,18 @@ export async function renderCustomersList(appEl, query) {
     setTimeout(() => restoreScrollOnce_(), 0);
   }
 
-  await fetchAndRender_({ force: false });
+  // 初期表示では一覧取得しない
+  // await fetchAndRender_({ force: false });
 
-  // ===== フィルタUI（keyword は即時反映）=====
-  kwEl?.addEventListener("input", () => {
+  // Enter で検索実行（スマホUX）
+  kwEl?.addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    _hasSearched = true;
     state.keyword = kwEl.value || "";
     saveState_(state);
-    applyAndRender_();
+    if (!_fetched) await fetchAndRender_({ force: false }); // 初回は取得してからフィルタ
+    else applyAndRender_();
   });
 
   // ボタン類（clear / refresh）
@@ -249,8 +315,20 @@ export async function renderCustomersList(appEl, query) {
       return;
     }
 
-    if (a === "refresh") {
+    if (a === "list") {
+      // 一覧取得: 担当関係のある顧客を全件取得して表示
+      _hasSearched = false; // 一覧ボタンでの表示として扱う（文言制御のみ）
       await fetchAndRender_({ force: true });
+      return;
+    }
+
+    if (a === "search") {
+      _hasSearched = true;
+      state.keyword = (kwEl && kwEl.value) ? kwEl.value : (state.keyword || "");
+      saveState_(state);
+      // 初回検索はサーバから一覧取得→クライアント側でフィルタ（GAS側に検索APIが無い前提でも成立）
+      if (!_fetched) await fetchAndRender_({ force: false });
+      else applyAndRender_();
       return;
     }
   });
