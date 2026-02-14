@@ -4,6 +4,14 @@ import { callGas, unwrapResults } from "../api.js";
 import { CONFIG } from "../config.js";
 import { getIdToken, getUser } from "../auth.js";
 
+let _fixedCustomerId = "";
+
+function getFixedCustomerIdFromHash_() {
+  const hash = String(location.hash || "");
+  const q = hash.includes("?") ? hash.split("?")[1] : "";
+  return String(new URLSearchParams(q).get("customer_id") || "").trim();
+}
+
 const VISIT_TYPE_LABELS = {
   sitting: "シッティング",
   training: "トレーニング",
@@ -443,15 +451,13 @@ export function renderRegisterTab(app) {
 
   let _busy = false;
   let _draftObj = null; // { visits:[], warnings:[] }
-  const _fixedCustomerId = (() => {
-    const hash = String(location.hash || "");
-    const q = hash.includes("?") ? hash.split("?")[1] : "";
-    return String(new URLSearchParams(q).get("customer_id") || "").trim();
-  })();
+
+  _fixedCustomerId = getFixedCustomerIdFromHash_();
   if (!_fixedCustomerId) {
     toast({ message: "customer_id がありません。顧客詳細から予約登録を開いてください。" });
     return;
   }
+  
   let _hardErrors = [];
   let _lastCommitSucceeded = false;
   let _customerLookupTimer = null;
