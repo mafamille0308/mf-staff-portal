@@ -158,119 +158,30 @@ function calcEndHmFromStartAndCourse_(startTime, course) {
   return `${pad2_(eh)}:${pad2_(em)}`;
 }
 
-async function fetchInterpreterToken_() {
+async function callInterpreterViaGas_(mergedText, adminAssignStaffName) {
   const idToken = getIdToken();
-  console.log("[register] has id_token =", !!idToken, "len=", idToken ? idToken.length : 0);
-  if (!idToken) throw new Error("未ログインです！id_tokenがありません。ログインしてください。");
-  const r = await callGas({ action: "issueInterpreterToken" }, idToken);
-  console.log("[register] issueInterpreterToken response received =", !!r, "hasRaw=", !!(r && r.raw));
+  console.log("[register] callInterpreterViaGas_: has id_token =", !!idToken, "len=", idToken ? idToken.length : 0);
+  if (!idToken) throw new Error("未ログインです。ログインし直してください。");
 
-  try { unwrapResults(r); } catch (_) {}
-
-  const raw = r && r.raw ? r.raw : r;
-  console.log("[register] issueInterpreterToken parsed =", {
-    ok: !!(raw && raw.ok),
-    hasToken: !!(raw && raw.token),
-    tokenLen: raw && raw.token ? String(raw.token).length : 0,
-    hasError: !!(raw && raw.error),
-  });
-
-  if (!raw || !raw.ok || !raw.token) {
-    throw new Error(raw && raw.error ? raw.error : "token issuance failed");
-  }
-
-  return raw.token;
-}
-
-async function callInterpreter_(token, emailText) {
-  console.log("[register] CONFIG.INTERPRETER_URL =", CONFIG.INTERPRETER_URL);
-  console.log("[register] callInterpreter_: enter", { hasToken: !!token, tokenLen: token ? String(token).length : 0, emailLen: emailText ? String(emailText).length : 0 });
-  if (!CONFIG.INTERPRETER_URL || CONFIG.INTERPRETER_URL.includes("YOUR_CLOUD_RUN_URL")) {
-    throw new Error("INTERPRETER_URL is not set");
-  }
-
-  console.log("[register] callInterpreter_: before getUser()");
-  const user = getUser() || {};
-  console.log("[register] callInterpreter_: after getUser()", { hasUser: !!user, hasStaffId: !!user.staff_id, role: user.role || "" });
-
-  if (!user || !user.staff_id) {
-    toast({ message: "スタッフ情報が取得できません。ログインしてください。" });
-    throw new Error("staff missing");
-  }
-  const staffId = user.staff_id || "";
-  const staffName = user.staff_name || user.name || "";
-  const isAdmin = user.role === "admin";
-  const adminAssignStaffName = (document.getElementById("reg_assign_staff_name")?.value || "").trim();
-
-  console.log("[register] callInterpreter_: build body (meta only)");
-  const body = {
-    op: "interpret_register_visits_v1",
-    email_text: emailText,
+  // ここでは Cloud Run へ一切アクセスしない（CORS回避＆URL秘匿）
+  // 解釈の実体は GAS がサーバ間で実行（GAS→Cloud Run）
+  const resp = await callGas({
+    action: "interpretRegisterViaGas",
+    text: mergedText,
     now_iso: nowIsoJst_(),
     tz: "Asia/Tokyo",
     constraints: {
       latest_end_time: "19:00",
       slide_limit_unspecified: "18:30",
       slot_minutes: 15,
-      // staffは「解釈対象」ではなく「実行制約」
-      // admin は「登録先スタッフ」を指定した場合のみ constraints に渡す（未指定は主担当をGAS側で決定）
-      staff_id: (!isAdmin) ? staffId : "",
-      staff_name: (!isAdmin) ? staffName : adminAssignStaffName,
+      // admin のみ「登録先スタッフ名」を渡す（未指定ならGAS側で主担当決定）
+      assign_staff_name: String(adminAssignStaffName || "").trim(),
     },
-  };
+  }, idToken);
 
-  console.log("[register] callInterpreter_: about to fetch", {
-    url: CONFIG.INTERPRETER_URL,
-    hasAuthHeader: !!token,
-    op: body.op,
-    tz: body.tz,
-    now_iso: body.now_iso,
-  });
-
-  console.log("[register] about to POST /interpret", {
-    url: CONFIG.INTERPRETER_URL,
-    hasToken: !!token,
-    tokenLen: token ? String(token).length : 0,
-    op: body.op,
-    tz: body.tz,
-    now_iso: body.now_iso,
-    emailLen: emailText ? String(emailText).length : 0,
-    constraints: {
-      latest_end_time: body.constraints.latest_end_time,
-      slide_limit_unspecified: body.constraints.slide_limit_unspecified,
-      slot_minutes: body.constraints.slot_minutes,
-      // PIIになりにくい範囲でメタのみ（必要なら staff_id も外せます）
-      staff_id_present: !!body.constraints.staff_id,
-      staff_name_present: !!body.constraints.staff_name,
-    },
-  });
-
-  const resp = await fetch(CONFIG.INTERPRETER_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  const contentType = resp.headers.get("content-type") || "";
-  const text = await resp.text();
-  console.log("[register] /interpret response meta", {
-    status: resp.status,
-    ok: resp.ok,
-    contentType,
-    bodyLen: text ? String(text).length : 0,
-  });
-
-  let data = {};
-  try { data = JSON.parse(text); }
-  catch (e) { data = {}; }
-
-  if (!resp.ok) {
-    const detail = (data && (data.detail || data.error || data.message)) ? (data.detail || data.error || data.message) : "";
-    throw new Error(detail ? String(detail) : `Interpreter error (${resp.status})`);  }
-  if (!data.ok || !data.draft) throw new Error(data.error || "invalid interpreter response");
+  const u = unwrapResults(resp) || resp;
+  const data = (u && u.raw) ? u.raw : u; // 互換（GAS側が raw を返す場合に備える）
+  if (!data || !data.ok || !data.draft) throw new Error((data && data.error) ? data.error : "invalid interpreter response (via GAS)");
   return data;
 }
 
@@ -1178,7 +1089,7 @@ export function renderRegisterTab(app) {
     console.log("[register] email length =", emailEl && emailEl.value ? String(emailEl.value).length : 0);
     if (_busy) return;
     const emailText = String(emailEl.value || "").trim();
-    if (!emailText) return toast({ message: "メール本文を貼り付けてください" });
+    if (!emailText) return toast({ message: "依頼文を貼り付けてください" });
 
     const hintText = buildHintText_();
     const mergedText = hintText ? `${emailText}\n\n${hintText}\n` : emailText;
@@ -1190,14 +1101,10 @@ export function renderRegisterTab(app) {
     renderCustomerCandidates_(null);
 
     try {
-      console.log("[register] step1: before fetchInterpreterToken_");
-      const token = await fetchInterpreterToken_();
-      console.log("[register] step2: token issued len=", String(token || "").length);
-
-      console.log("[register] step3: before callInterpreter_");
       const adminAssignStaffName = (assignStaffNameEl && String(assignStaffNameEl.value || "").trim()) || "";
-      const data = await callInterpreter_(token, mergedText, adminAssignStaffName);
-      console.log("[register] step4: callInterpreter_ ok=", !!(data && data.ok));
+      console.log("[register] step1: before callInterpreterViaGas_");
+      const data = await callInterpreterViaGas_(mergedText, adminAssignStaffName);
+      console.log("[register] step2: callInterpreterViaGas_ ok=", !!(data && data.ok));
 
       _draftObj = data.draft;
       _selectedCustomer = null;
