@@ -43,7 +43,7 @@ async function route() {
   if (path.startsWith("/visits")) setActiveNav("visits");
   else if (path.startsWith("/customers")) setActiveNav("customers");
   else if (path.startsWith("/summary")) setActiveNav("summary");
-  else if (path.startsWith("/register")) setActiveNav("register");
+  else if (path.startsWith("/register")) setActiveNav("");
   else setActiveNav("");
 
   // 未ログインはログイン画面
@@ -80,7 +80,7 @@ async function route() {
     } else if (path === "/summary") {
       renderSummaryPlaceholder(app);
     } else if (path === "/register") {
-      renderRegisterTab(app);
+      renderRegisterTab(app, query);
     } else {
       render(app, `<section class="section"><h1 class="h1">Not Found</h1><p class="p">${path}</p></section>`);
     }

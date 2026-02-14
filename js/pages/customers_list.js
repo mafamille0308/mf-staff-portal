@@ -117,7 +117,8 @@ function cardHtml(c) {
       <div class="pets-badges">
         ${renderPetsBadges_(c.pet_names)}
       </div>
-      <div class="row" style="justify-content:flex-end; margin-top:10px;">
+      <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px;">
+        <button class="btn btn-primary" type="button" data-action="register">予約登録</button>
         <button class="btn" type="button" data-action="open">顧客詳細</button>
       </div>
     </div>
@@ -333,7 +334,7 @@ export async function renderCustomersList(appEl, query) {
     }
   });
 
-  // ===== カード内アクション（詳細へ）=====
+  // ===== カード内アクション（詳細/登録へ）=====
   listEl.addEventListener("click", (e) => {
     const actEl = e.target.closest("[data-action]");
     if (!actEl) return;
@@ -351,6 +352,12 @@ export async function renderCustomersList(appEl, query) {
         markRestoreOnce_();
       } catch (_) {}
       location.hash = `#/customers?id=${encodeURIComponent(cid)}`;
+      return;
+    }
+
+    if (action === "register") {
+      // 顧客を確定した状態で予約登録画面へ
+      location.hash = `#/register?customer_id=${encodeURIComponent(cid)}`;
       return;
     }
   });

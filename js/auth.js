@@ -131,7 +131,7 @@ export function initGoogleLogin({ containerId = "app", onLogin } = {}) {
           try { clearIdToken(); } catch (_) {}
           toast({
             title: "ログイン不可",
-            message: "このアカウントは利用許可がありません（Staffs.login_email未登録、または無効）。"
+            message: "このアカウントは利用許可がありません。"
           });
         }
       })();

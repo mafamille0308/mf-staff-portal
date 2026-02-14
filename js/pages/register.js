@@ -1226,6 +1226,8 @@ export function renderRegisterTab(app) {
 
   commitBtn.addEventListener("click", async () => {
     if (!_selectedCustomer) return toast({ message: "先に顧客を確定してください" });
+    const customerId = String(_selectedCustomer.customer_id || "").trim();
+    if (!customerId) return toast({ message: "先に顧客を確定してください" });
     if (_busy) return;
     const draft = _draftObj;
     const visits = Array.isArray(draft && draft.visits) ? draft.visits : [];
@@ -1237,6 +1239,9 @@ export function renderRegisterTab(app) {
       // UIでは end_time を扱わない。存在しても送らない。
       try { delete nv.end_time; } catch (e) {}
       // ついでに "表示専用" の可能性があるフィールドも将来整理しやすいようにここで固定
+      // 顧客は UI で確定済み。登録事故防止のため customer_id を強制注入する
+      nv.customer_id = customerId;
+      if (_selectedCustomer && _selectedCustomer.name) nv.customer_name = _selectedCustomer.name;
       return nv;
     });
 
@@ -1273,6 +1278,8 @@ export function renderRegisterTab(app) {
         action: "bulkRegisterVisits",
         request_id: _lastCommitRequestId,
         content_hash: _lastCommitHash,
+        strict_customer_id: true,
+        customer_id: customerId,
         visits: visitsForCommit,
         source: "portal_register",
       }, idToken);

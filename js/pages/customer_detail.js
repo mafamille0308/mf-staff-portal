@@ -429,7 +429,10 @@ export async function renderCustomerDetail(appEl, query) {
     <section class="section">
       <div class="row row-between">
         <h1 class="h1">顧客詳細</h1>
-        <a class="btn btn-ghost" href="#/customers" id="btnBackCustomers">一覧に戻る</a>
+        <div class="row" style="gap:8px;">
+          <a class="btn btn-primary" href="#/register?customer_id=${encodeURIComponent(customerId)}">予約登録</a>
+          <a class="btn btn-ghost" href="#/customers" id="btnBackCustomers">一覧に戻る</a>
+        </div>
       </div>
       <div class="hr"></div>
       <div data-el="host"><p class="p">読み込み中...</p></div>
