@@ -163,10 +163,13 @@ async function callInterpreterViaGas_(mergedText, adminAssignStaffName) {
   console.log("[register] callInterpreterViaGas_: has id_token =", !!idToken, "len=", idToken ? idToken.length : 0);
   if (!idToken) throw new Error("未ログインです。ログインし直してください。");
 
-  // ここでは Cloud Run へ一切アクセスしない（CORS回避＆URL秘匿）
+  const customerId = String(_fixedCustomerId || "").trim();
+  if (!customerId) throw new Error("customer_id がありません。顧客詳細から予約登録を開いてください。");
+
   // 解釈の実体は GAS がサーバ間で実行（GAS→Cloud Run）
   const resp = await callGas({
     action: "interpretRegisterViaGas",
+    customer_id: customerId,
     text: mergedText,
     now_iso: nowIsoJst_(),
     tz: "Asia/Tokyo",
@@ -348,14 +351,6 @@ export function renderRegisterTab(app) {
             <p class="p text-sm text-muted" style="margin-bottom:12px;">補足情報を追加するとAIの解釈精度が向上します</p>
             
             <div class="hint-row" style="margin-bottom:10px;">
-              <label class="hint-label" style="min-width:140px;">顧客名</label>
-              <input id="reg_hint_customer" class="input" placeholder="例: 佐藤 花子" />
-            </div>
-            <div class="hint-row" style="margin-bottom:10px;">
-              <label class="hint-label" style="min-width:140px;">顧客特定ヒント</label>
-              <input id="reg_hint_customer_info" class="input" placeholder="例: 住所の一部 / マンション名 / ペット名" />
-            </div>
-            <div class="hint-row" style="margin-bottom:10px;">
               <label class="hint-label" style="min-width:140px;">訪問期間</label>
               <input id="reg_hint_date" class="input" placeholder="例: 1/1 から 1/5" />
             </div>
@@ -403,12 +398,6 @@ export function renderRegisterTab(app) {
         </button>
       </div>
 
-      <!-- 顧客候補 -->
-      <div id="reg_customer_candidates" class="is-hidden" style="margin-bottom:20px;"></div>
-
-      <!-- 顧客確定（選択済みの表示） -->
-      <div id="reg_customer_selected" class="is-hidden" style="margin-bottom:20px;"></div>
-
       <!-- 警告エリア -->
       <div id="reg_warnings" class="is-hidden" style="margin-bottom:20px;"></div>
 
@@ -436,8 +425,6 @@ export function renderRegisterTab(app) {
   `);
 
   const emailEl = qs("#reg_email");
-  const hintCustomerEl = qs("#reg_hint_customer");
-  const hintCustomerInfoEl = qs("#reg_hint_customer_info");
   const hintDateEl = qs("#reg_hint_date");
   const hintCountEl = qs("#reg_hint_count");
   const hintTimeEl = qs("#reg_hint_time");
@@ -451,14 +438,20 @@ export function renderRegisterTab(app) {
   const resultEl = qs("#reg_result");
   const warningsEl = qs("#reg_warnings");
   const previewEl = qs("#reg_preview");
-  const customerCandidatesEl = qs("#reg_customer_candidates");
-  const customerSelectedEl = qs("#reg_customer_selected");
   const overlayEl = qs("#reg_overlay");
   const overlayTextEl = qs("#reg_overlay_text");
 
   let _busy = false;
   let _draftObj = null; // { visits:[], warnings:[] }
-  let _selectedCustomer = null; // { customer_id, name, kana?, memo? }
+  const _fixedCustomerId = (() => {
+    const hash = String(location.hash || "");
+    const q = hash.includes("?") ? hash.split("?")[1] : "";
+    return String(new URLSearchParams(q).get("customer_id") || "").trim();
+  })();
+  if (!_fixedCustomerId) {
+    toast({ message: "customer_id がありません。顧客詳細から予約登録を開いてください。" });
+    return;
+  }
   let _hardErrors = [];
   let _lastCommitSucceeded = false;
   let _customerLookupTimer = null;
@@ -577,164 +570,6 @@ export function renderRegisterTab(app) {
     previewEl.classList.remove("is-hidden");
   }
 
-  function renderCustomerCandidates_(state) {
-    if (!customerCandidatesEl) return;
-    if (!state || !state.name) {
-      customerCandidatesEl.classList.add("is-hidden");
-      customerCandidatesEl.innerHTML = "";
-      return;
-    }
-    const { status, results = [], error } = state;
-    if (status === "loading") {
-      customerCandidatesEl.innerHTML = `
-        <div class="card">
-          <p class="p">顧客候補を検索中：${escapeHtml(state.name)}</p>
-        </div>
-      `;
-      customerCandidatesEl.classList.remove("is-hidden");
-      return;
-    }
-    if (status === "error") {
-      customerCandidatesEl.innerHTML = `
-        <div class="card card-warning">
-          <p class="p text-danger"><b>顧客候補の取得に失敗</b></p>
-          <p class="p">${escapeHtml(error || "不明なエラーです")}</p>
-        </div>
-      `;
-      customerCandidatesEl.classList.remove("is-hidden");
-      return;
-    }
-
-    const count = Array.isArray(results) ? results.length : 0;
-    const title = count > 1
-      ? `顧客候補が複数あります（${count}件）`
-      : count === 1
-        ? "顧客候補が1件見つかりました"
-        : "該当する顧客候補が見つかりませんでした";
-
-    const list = (results || []).slice(0, 5).map((r, idx) => {
-      const name = r.name || r.customer_name || r.display_name || "";
-      const kana = r.kana || r.name_kana || "";
-      const id = r.id || r.customer_id || "";
-      const memo = r.memo || "";
-      const address = r.address || "";
-      const petNames = Array.isArray(r.pet_names) ? r.pet_names : [];
-      const petsLine = petNames.length ? petNames.join("/") : "";
-
-        const picked = 
-          (_selectedCustomer &&
-            _selectedCustomer.customer_id &&
-            String(_selectedCustomer.customer_id) === String(id))
-            ? "checked"
-            : "";
-
-        return `
-          <label class="candidate-row candidate-pick">
-            <div class="row" style="align-items:flex-start; gap:10px;">
-              <input
-                type="radio"
-                name="reg_customer_pick"
-                value="${escapeHtml(id)}"
-                data-idx="${idx}"
-                ${picked}
-              />
-              <div style="flex:1;">
-                <div class="candidate-title">
-                  #${idx + 1} ${escapeHtml(name || "(名称不明)")}
-                </div>
-
-                <div class="candidate-meta text-muted text-sm">
-                  ${kana ? ` / ${escapeHtml(kana)}` : ""}
-                </div>
-
-                ${address
-                  ? `<div class="candidate-meta text-sm">住所：${escapeHtml(address)}</div>`
-                  : ""
-                }
-
-                ${petsLine
-                  ? `<div class="candidate-meta text-sm">ペット：${escapeHtml(petsLine)}</div>`
-                  : ""
-                }
-
-                ${memo
-                  ? `<div class="candidate-memo text-sm">${escapeHtml(memo)}</div>`
-                  : ""
-                }
-              </div>
-            </div>
-          </label>
-        `;
-      }).join("");
-
-    customerCandidatesEl.innerHTML = `
-      <div class="card ${count > 1 ? "card-warning" : ""}">
-        <p class="p"><b>${escapeHtml(title)}</b></p>
-        <p class="p text-sm text-muted">キー：${escapeHtml(state.name)}</p>
-        ${list ? `<div class="candidate-list">${list}</div>` : ""}
-      </div>
-    `;
-    customerCandidatesEl.classList.remove("is-hidden");
-
-    const radios = customerCandidatesEl.querySelectorAll('input[name="reg_customer_pick"]');
-    radios.forEach((el) => {
-      el.addEventListener("change", () => {
-        try {
-          const i = Number(el.getAttribute("data-idx") || "0");
-          const picked = results[i];
-          applyCustomerToDraft_(picked);
-          renderCustomerCandidates_({ ...state });
-          refreshUI_();
-        } catch (e) {
-          toast({ message: (e && e.message) ? e.message : String(e) });
-        }
-      });
-    });
-
-    if (results.length === 1 && !_selectedCustomer) {
-     applyCustomerToDraft_(results[0]);
-     refreshUI_();
-     renderCustomerCandidates_({ ...state });
-    }
-  }
-
-  function renderCustomerSelected_() {
-    if (!customerSelectedEl) return;
-    if (!_selectedCustomer) {
-      customerSelectedEl.classList.add("is-hidden");
-      customerSelectedEl.innerHTML = "";
-      return;
-    }
-    const name = _selectedCustomer.name || "";
-    const id = _selectedCustomer.customer_id || "";
-    customerSelectedEl.innerHTML = `
-      <div class="card">
-        <p class="p"><b>顧客確定</b>：${escapeHtml(name)} ${id ? `<span class="badge">ID:${escapeHtml(id)}</span>` : ""}</p>
-        <p class="p text-sm text-muted">顧客を変更する場合は、顧客名を指定して再生成してください。</p>
-      </div>
-    `;
-    customerSelectedEl.classList.remove("is-hidden");
-  }
-
-  function applyCustomerToDraft_(customer) {
-    if (!customer || !_draftObj) return;
-    const id = String(customer.customer_id || customer.id || "").trim();
-    if (!id) return;
-
-    _selectedCustomer = {
-      customer_id: id,
-      name: String(customer.name || customer.customer_name || "").trim() || String(customer.display_name || "").trim(),
-      kana: String(customer.kana || "").trim(),
-      memo: String(customer.memo || "").trim(),
-    };
-
-    const visits = Array.isArray(_draftObj.visits) ? _draftObj.visits : [];
-    visits.forEach(v => {
-      v.customer_id = id;
-      v.customer_name = _selectedCustomer.name || v.customer_name || "";
-    });
-  }
-
   function computeHardErrors_(draft) {
     const errors = [];
     const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
@@ -770,8 +605,6 @@ export function renderRegisterTab(app) {
       return;
     }
 
-    const locked = !_selectedCustomer;
-
     const cards = visits.map((v, idx) => {
       const rowNum = v.row_num != null ? String(v.row_num) : String(idx + 1);
       const date = String(v.date || "").trim();
@@ -793,7 +626,7 @@ export function renderRegisterTab(app) {
       }).join("");
 
       return `
-        <div class="preview-card ${locked ? "is-locked" : ""}" data-idx="${idx}" style="padding:12px; margin-bottom:12px; border:1px solid #ddd; border-radius:8px;">
+        <div class="preview-card" data-idx="${idx}" style="padding:12px; margin-bottom:12px; border:1px solid #ddd; border-radius:8px;">
           <!-- ヘッダー部分：スマホで縦並び -->
           <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #eee;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
@@ -807,14 +640,13 @@ export function renderRegisterTab(app) {
                     class="input mono"
                     data-field="date"
                     value="${escapeHtml(date || "")}"
-                    ${locked ? "disabled" : ""}
                     style="width: 160px; max-width: 60vw; font-size:14px;"
                   />
                 </div>
               </div>
               <div style="display:flex; gap:6px; flex-shrink:0;">
-                <button class="btn btn-sm" type="button" data-action="dup" ${locked ? "disabled" : ""} title="複製" style="padding:4px 8px; min-width:auto;">📋</button>
-                <button class="btn btn-sm" type="button" data-action="del" ${locked ? "disabled" : ""} title="削除" style="padding:4px 8px; min-width:auto; color:#d32f2f;">🗑️</button>
+                <button class="btn btn-sm" type="button" data-action="dup" title="複製" style="padding:4px 8px; min-width:auto;">📋</button>
+                <button class="btn btn-sm" type="button" data-action="del" title="削除" style="padding:4px 8px; min-width:auto; color:#d32f2f;">🗑️</button>
               </div>
             </div>
             ${warnBadges ? `<div style="margin-top:6px;">${warnBadges}</div>` : ""}
@@ -823,7 +655,7 @@ export function renderRegisterTab(app) {
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px; margin-bottom:10px;">
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">⏰ 開始</label>
-              <input type="time" class="input mono" data-field="start_time" value="${escapeHtml(st || "09:00")}" ${locked ? "disabled" : ""} style="font-size:14px;" />
+              <input type="time" class="input mono" data-field="start_time" value="${escapeHtml(st || "09:00")}" style="font-size:14px;" />
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">⏱️ 終了</label>
@@ -831,19 +663,19 @@ export function renderRegisterTab(app) {
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">📦 コース</label>
-              <select class="input" data-field="course" ${locked ? "disabled" : ""} style="font-size:14px;">
+              <select class="input" data-field="course" style="font-size:14px;">
                 ${courseSelectHtml_(course || "30min")}
               </select>
             </div>
             <div>
               <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">🏷️ タイプ</label>
-              <select class="input" data-field="visit_type" ${locked ? "disabled" : ""} style="font-size:14px;">${typeOptions}</select>
+              <select class="input" data-field="visit_type" style="font-size:14px;">${typeOptions}</select>
             </div>
           </div>
 
           <div>
             <label class="label-sm" style="display:block; margin-bottom:4px; font-weight:600; color:#555; font-size:12px;">📝 メモ</label>
-            <textarea class="textarea" rows="2" data-field="memo" ${locked ? "disabled" : ""} placeholder="この訪問に関するメモ（任意）" style="font-size:14px;">${escapeHtml(memo)}</textarea>
+            <textarea class="textarea" rows="2" data-field="memo" placeholder="この訪問に関するメモ（任意）" style="font-size:14px;">${escapeHtml(memo)}</textarea>
           </div>
         </div>
       `;
@@ -854,9 +686,7 @@ export function renderRegisterTab(app) {
         <div style="margin-bottom:16px;">
           <h2 style="font-size:16px; font-weight:600; margin:0 0 4px 0;">登録候補（${visits.length}件）</h2>
           <p class="p text-sm text-muted" style="margin:0;">
-            ${locked 
-              ? "⚠️ 先に上の顧客候補から選択してください" 
-              : "⚠️ AIの解釈は正確とは限りません。必要に応じて修正してください。"}
+            ⚠️ AIの解釈は正確とは限りません。必要に応じて修正してください。
           </p>
         </div>
         <div class="preview-wrap">${cards}</div>
@@ -866,28 +696,22 @@ export function renderRegisterTab(app) {
   }
 
   function refreshUI_() {
-    renderCustomerSelected_();
     _hardErrors = computeHardErrors_(_draftObj);
 
     let warnings = (_draftObj && Array.isArray(_draftObj.warnings)) ? _draftObj.warnings : [];
-    // 顧客が確定しているなら、missing_customer_name は解消済み扱い（表示しない）
-    if (_selectedCustomer && _selectedCustomer.customer_id) {
-      warnings = warnings.filter(w => String(w && w.code || "") !== "missing_customer_name");
-    }
+    warnings = warnings.filter(w => String(w && w.code || "") !== "missing_customer_name");
     const hardAsWarnings = _hardErrors.map(e => ({ code: e.code, message: e.message, row_nums: [] }));
     renderWarnings_([ ...warnings, ...hardAsWarnings ]);
 
     renderEditor_(_draftObj);
 
     const hasDraft = !!(_draftObj && Array.isArray(_draftObj.visits) && _draftObj.visits.length);
-    const hasCustomer = !!_selectedCustomer;
     const hasHardError = !!(_hardErrors && _hardErrors.length);
-    commitBtn.disabled = _busy || !hasDraft || !hasCustomer || hasHardError;
+    commitBtn.disabled = _busy || !hasDraft || hasHardError;
   }
 
   function buildHintText_() {
     const hints = [
-      { label: "顧客名", el: hintCustomerEl },
       { label: "訪問期間", el: hintDateEl },
       { label: "訪問回数", el: hintCountEl },
       { label: "訪問時間", el: hintTimeEl },
@@ -915,7 +739,7 @@ export function renderRegisterTab(app) {
     previewEl.addEventListener("click", (ev) => {
       const btn = ev.target && ev.target.closest ? ev.target.closest("button[data-action]") : null;
       if (!btn) return;
-      if (!_draftObj || !_selectedCustomer) return;
+      if (!_draftObj) return;
       const wrap = btn.closest("[data-idx]");
       const idx = wrap ? Number(wrap.getAttribute("data-idx") || "0") : -1;
       if (idx < 0) return;
@@ -941,7 +765,7 @@ export function renderRegisterTab(app) {
 
     previewEl.addEventListener("input", (ev) => {
       const el = ev.target;
-      if (!el || !_draftObj || !_selectedCustomer) return;
+      if (!el || !_draftObj) return;
       const field = el.getAttribute("data-field");
       if (!field) return;
       const wrap = el.closest("[data-idx]");
@@ -991,7 +815,7 @@ export function renderRegisterTab(app) {
           clearTimeout(_memoDebounceTimer);
         }
         _memoDebounceTimer = setTimeout(() => {
-          syncDraftTextarea_(); // JSONテキストエリアだけ更新
+          if (typeof syncDraftTextarea_ === "function") syncDraftTextarea_();
         }, 300);
 
         return; // UI全体の再描画は不要（入力モード維持のため）
@@ -1000,87 +824,6 @@ export function renderRegisterTab(app) {
       try { delete v.end_time; } catch (e) {}
       refreshUI_();
     });
-  }
-
-  function scheduleCustomerLookup_(draft) {
-    if (_customerLookupTimer) window.clearTimeout(_customerLookupTimer);
-    _customerLookupTimer = window.setTimeout(() => {
-      fetchCustomerCandidates_(draft);
-    }, 400);
-  }
-
-  async function fetchCustomerCandidates_(draft) {
-    const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
-    const first = visits[0] || {};
-
-    // 顧客名（従来キー）
-    const nameQuery = String(first.customer_name || "").trim();
-
-    // 顧客特定ヒント（住所断片 / ペット名）
-    const hintQuery = String(hintCustomerInfoEl?.value || "").trim();
-
-    if (!nameQuery && !hintQuery) {
-      renderCustomerCandidates_(null);
-      return;
-    }
-
-    renderCustomerCandidates_({
-      status: "loading",
-      name: nameQuery || hintQuery,
-    });
-
-    try {
-      const idToken = getIdToken();
-      if (!idToken) throw new Error("未ログインです。ログインし直してください。");
-
-     // 安全優先の検索順序：
-     // - name がある：まず name のみ（hintは使わない）
-     //   - 0件なら救済で name+hint
-     //   - 複数なら hint がある場合のみ name+hint（絞り/再ランク）
-     // - name がない：hint のみ
-
-     async function call_(nq, hq) {
-       const resp = await callGas({
-         action: "searchCustomerCandidates",
-         name_query: nq,
-         hint_query: hq,
-         limit: 20,
-       }, idToken);
-       const u = unwrapResults(resp) || {};
-       return (u && Array.isArray(u.results)) ? u.results : [];
-     }
-
-     let results = [];
-     if (nameQuery) {
-       // 1st: name only
-       results = await call_(nameQuery, "");
-
-       if (results.length === 0 && hintQuery) {
-         // fallback: name + hint
-         results = await call_(nameQuery, hintQuery);
-       } else if (results.length >= 2 && hintQuery) {
-         // narrow/rerank with hint (if it helps)
-         const r2 = await call_(nameQuery, hintQuery);
-         if (r2.length > 0) results = r2;
-       }
-     } else {
-       // name empty: hint only
-       results = await call_("", hintQuery);
-     }
-
-     renderCustomerCandidates_({
-       status: "loaded",
-       name: nameQuery || hintQuery,
-       results,
-     });
-
-    } catch (e) {
-      renderCustomerCandidates_({
-        status: "error",
-        name: nameQuery || hintQuery,
-        error: (e && e.message) ? e.message : String(e),
-      });
-    }
   }
 
   interpretBtn.addEventListener("click", async () => {
@@ -1098,7 +841,6 @@ export function renderRegisterTab(app) {
     resultEl.innerHTML = "";
     renderWarnings_([]);
     renderPreview_(null);
-    renderCustomerCandidates_(null);
 
     try {
       const adminAssignStaffName = (assignStaffNameEl && String(assignStaffNameEl.value || "").trim()) || "";
@@ -1107,7 +849,7 @@ export function renderRegisterTab(app) {
       console.log("[register] step2: callInterpreterViaGas_ ok=", !!(data && data.ok));
 
       _draftObj = data.draft;
-      _selectedCustomer = null;
+      (Array.isArray(_draftObj?.visits) ? _draftObj.visits : []).forEach(v => { v.customer_id = _fixedCustomerId; });
       refreshUI_();
       scheduleCustomerLookup_(_draftObj);
       resultEl.innerHTML = `<div class="card"><p class="p">登録候補を生成しました。顧客を選択し、内容を確認して「登録実行」を押してください。</p></div>`;
@@ -1132,9 +874,8 @@ export function renderRegisterTab(app) {
   });
 
   commitBtn.addEventListener("click", async () => {
-    if (!_selectedCustomer) return toast({ message: "先に顧客を確定してください" });
-    const customerId = String(_selectedCustomer.customer_id || "").trim();
-    if (!customerId) return toast({ message: "先に顧客を確定してください" });
+    const customerId = String(_fixedCustomerId || "").trim();
+    if (!customerId) return toast({ message: "customer_id がありません。顧客詳細から予約登録を開いてください。" });
     if (_busy) return;
     const draft = _draftObj;
     const visits = Array.isArray(draft && draft.visits) ? draft.visits : [];
@@ -1148,7 +889,6 @@ export function renderRegisterTab(app) {
       // ついでに "表示専用" の可能性があるフィールドも将来整理しやすいようにここで固定
       // 顧客は UI で確定済み。登録事故防止のため customer_id を強制注入する
       nv.customer_id = customerId;
-      if (_selectedCustomer && _selectedCustomer.name) nv.customer_name = _selectedCustomer.name;
       return nv;
     });
 
