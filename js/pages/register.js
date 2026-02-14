@@ -457,10 +457,9 @@ export function renderRegisterTab(app) {
     toast({ message: "customer_id がありません。顧客詳細から予約登録を開いてください。" });
     return;
   }
-  
+
   let _hardErrors = [];
   let _lastCommitSucceeded = false;
-  let _customerLookupTimer = null;
   let _lastCommitHash = "";
   let _lastCommitRequestId = "";
   let _memoDebounceTimer = null;
@@ -857,7 +856,6 @@ export function renderRegisterTab(app) {
       _draftObj = data.draft;
       (Array.isArray(_draftObj?.visits) ? _draftObj.visits : []).forEach(v => { v.customer_id = _fixedCustomerId; });
       refreshUI_();
-      scheduleCustomerLookup_(_draftObj);
       resultEl.innerHTML = `<div class="card"><p class="p">登録候補を生成しました。顧客を選択し、内容を確認して「登録実行」を押してください。</p></div>`;
     } catch (e) {
       const msg = (e && e.message) ? e.message : String(e);
