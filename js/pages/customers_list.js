@@ -357,7 +357,10 @@ export async function renderCustomersList(appEl, query) {
 
     if (action === "register") {
       // 顧客を確定した状態で予約登録画面へ
-      location.hash = `#/register?customer_id=${encodeURIComponent(cid)}`;
+    const c = (customersAll || []).find(x => String(x.customer_id || "") === String(cid)) || {};
+    const label = String(c.name || "").trim();
+    const base = `#/register?customer_id=${encodeURIComponent(cid)}`;
+    location.hash = label ? `${base}&customer_label=${encodeURIComponent(label)}` : base;
       return;
     }
   });
