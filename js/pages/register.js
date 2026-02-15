@@ -44,7 +44,7 @@ async function ensureVisitTypeOptions_() {
     const results = (u && Array.isArray(u.results)) ? u.results : [];
     const list = results
       .map((x) => ({
-        key: String(x.key || x.value || "").trim(),
+        key: String(x.key || x.type || x.value || "").trim(),
         label: String(x.label || x.name || "").trim(),
       }))
       .filter((x) => !!x.key);
