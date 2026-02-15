@@ -317,14 +317,6 @@ function fmtVisitType_(type) {
   return VISIT_TYPE_LABELS[k] || k;
 }
 
-function visitTypeSelectHtml_(currentType) {
-  const cur = String(currentType || "sitting").trim() || "sitting";
-  return Object.keys(VISIT_TYPE_LABELS).map((k) => {
-    const sel = (k === cur) ? "selected" : "";
-    return `<option value="${escapeHtml(k)}" ${sel}>${escapeHtml(fmtVisitType_(k))}</option>`;
-  }).join("");
-}
-
 export function renderRegisterTab(app) {
   render(app, `
     <section class="section">
@@ -521,12 +513,6 @@ export function renderRegisterTab(app) {
   let _lastCommitHash = "";
   let _lastCommitRequestId = "";
   let _memoDebounceTimer = null;
-
-  function populateCommonTypeOptions_() {
-    if (!commonTypeEl) return;
-    const cur = String(commonTypeEl.value || "sitting").trim() || "sitting";
-    commonTypeEl.innerHTML = visitTypeSelectHtml_(cur);
-  }
 
   function populateCommonCourseOptions_() {
     if (!commonCourseEl) return;
@@ -1089,7 +1075,7 @@ export function renderRegisterTab(app) {
   try { syncTimeTextarea_(); } catch (e) {}
   try { refreshEdgeOnceVisibility_(); } catch (e) {}
 
-  interpretBtn.addEventListener("click", async () => {
+  if (interpretBtn) interpretBtn.addEventListener("click", async () => {
     console.log("[register] generate button clicked");
     if (_busy) return;
     try {
@@ -1120,7 +1106,7 @@ export function renderRegisterTab(app) {
     }
   });
 
-  commitBtn.addEventListener("click", async () => {
+  if (commitBtn) commitBtn.addEventListener("click", async () => {
     const customerId = String(_fixedCustomerId || "").trim();
     if (!customerId) return toast({ message: "customer_id がありません。顧客詳細から予約登録を開いてください。" });
     if (_busy) return;
