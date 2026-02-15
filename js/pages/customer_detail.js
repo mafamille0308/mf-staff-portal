@@ -430,7 +430,7 @@ export async function renderCustomerDetail(appEl, query) {
       <div class="row row-between">
         <h1 class="h1">顧客詳細</h1>
         <div class="row" style="gap:8px;">
-          <a class="btn btn-primary" href="#/register?customer_id=${encodeURIComponent(customerId)}">予約登録</a>
+          <a class="btn btn-primary" id="btnRegister" href="#/register?customer_id=${encodeURIComponent(customerId)}">予約登録</a>
           <a class="btn btn-ghost" href="#/customers" id="btnBackCustomers">一覧に戻る</a>
         </div>
       </div>
@@ -1241,6 +1241,15 @@ export async function renderCustomerDetail(appEl, query) {
       ${section("ペット情報", petsHtml, petActionsHtml)}
       ${section("お世話情報", careHtml, "")}
     `;
+
+    try {
+      const regBtn = appEl.querySelector("#btnRegister");
+      if (regBtn) {
+        const label = String(c.name || "").trim();
+        const base = `#/register?customer_id=${encodeURIComponent(customerId)}`;
+        regBtn.setAttribute("href", label ? `${base}&customer_label=${encodeURIComponent(label)}` : base);
+      }
+    } catch (_) {}
 
     // 編集モード初期状態：その他詳細欄の有効/無効を反映
     if (_mode === "edit") {

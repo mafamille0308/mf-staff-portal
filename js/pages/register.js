@@ -5,11 +5,19 @@ import { CONFIG } from "../config.js";
 import { getIdToken, getUser } from "../auth.js";
 
 let _fixedCustomerId = "";
+let _fixedCustomerLabel = "";
 
 function getFixedCustomerIdFromHash_() {
   const hash = String(location.hash || "");
   const q = hash.includes("?") ? hash.split("?")[1] : "";
   return String(new URLSearchParams(q).get("customer_id") || "").trim();
+}
+
+function getFixedCustomerLabelFromHash_() {
+  const hash = String(location.hash || "");
+  const q = hash.includes("?") ? hash.split("?")[1] : "";
+  // 表示専用。無ければ空でOK
+  return String(new URLSearchParams(q).get("customer_label") || "").trim();
 }
 
 const VISIT_TYPE_LABELS = {
@@ -34,6 +42,10 @@ function nowIsoJst_() {
 
 function pad2_(n) {
   return String(n).padStart(2, "0");
+}
+
+function isYmd_(s) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
 
 /**
@@ -166,40 +178,6 @@ function calcEndHmFromStartAndCourse_(startTime, course) {
   return `${pad2_(eh)}:${pad2_(em)}`;
 }
 
-async function callInterpreterViaGas_(mergedText, adminAssignStaffName) {
-  const idToken = getIdToken();
-  console.log("[register] callInterpreterViaGas_: has id_token =", !!idToken, "len=", idToken ? idToken.length : 0);
-  if (!idToken) throw new Error("未ログインです。ログインし直してください。");
-
-  const customerId = String(_fixedCustomerId || "").trim();
-  if (!customerId) throw new Error("customer_id がありません。顧客詳細から予約登録を開いてください。");
-
-  // 解釈の実体は GAS がサーバ間で実行（GAS→Cloud Run）
-  const resp = await callGas({
-    action: "interpretRegisterViaGas",
-    customer_id: customerId,
-    text: mergedText,
-    now_iso: nowIsoJst_(),
-    tz: "Asia/Tokyo",
-    constraints: {
-      latest_end_time: "19:00",
-      slide_limit_unspecified: "18:30",
-      slot_minutes: 15,
-      // admin のみ「登録先スタッフ名」を渡す（未指定ならGAS側で主担当決定）
-      assign_staff_name: String(adminAssignStaffName || "").trim(),
-    },
-  }, idToken);
-
-  const u = unwrapResults(resp) || resp;
-  const data = (u && u.raw) ? u.raw : u; // 互換（GAS側が raw を返す場合に備える）
-  if (!data || !data.ok || !data.draft) throw new Error((data && data.error) ? data.error : "invalid interpreter response (via GAS)");
-  return data;
-}
-
-function prettyJson_(obj) {
-  return JSON.stringify(obj, null, 2);
-}
-
 function renderCommitSummary_(u) {
   // 可能な範囲で人間向けに要点だけ表示（詳細はJSONを参照）
   if (!u) return "";
@@ -272,55 +250,6 @@ function commitTitleAndToast_(sum) {
   return { title: "失敗", toastTitle: "失敗", toastMsg: `登録できませんでした（失敗${sum.failed} / スキップ${sum.skipped}）。` };
 }
 
-// ========= 診断（エラー時のみ表示＋コピー） =========
-function safeJson_(v) {
-  try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
-}
-
-async function copyToClipboard_(text) {
-  const s = String(text || "");
-  if (!s) return false;
-  // Clipboard API（HTTPS / GitHub Pages 想定）
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(s);
-      return true;
-    }
-  } catch (e) {}
-  // fallback
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = s;
-    ta.style.position = "fixed";
-    ta.style.left = "-9999px";
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  } catch (e) {}
-  return false;
-}
-
-async function showDiagnosticModal_({ title = "診断情報", diagText = "" } = {}) {
-  const bodyHtml = `
-    <p class="p text-sm text-muted" style="margin:0 0 8px 0;">
-      以下をコピーして共有してください（個人情報を含めない設計です）。
-    </p>
-    <textarea class="textarea mono" rows="14" readonly style="font-size:12px;">${escapeHtml(diagText)}</textarea>
-  `;
-  const ok = await showModal({
-    title,
-    bodyHtml,
-    okText: "コピー",
-    cancelText: "閉じる",
-  });
-  if (!ok) return;
-  const copied = await copyToClipboard_(diagText);
-  toast({ title: copied ? "コピーしました" : "コピー失敗", message: copied ? "診断情報をクリップボードに保存しました。" : "手動でコピーしてください。" });
-}
-
 async function sha256Hex_(text) {
   // Web Crypto API：https環境 / GitHub PagesでOK
   const enc = new TextEncoder();
@@ -339,45 +268,100 @@ function fmtVisitType_(type) {
   return VISIT_TYPE_LABELS[type] || String(type || "");
 }
 
+function visitTypeSelectHtml_(currentType) {
+  const cur = String(currentType || "sitting").trim() || "sitting";
+  return Object.keys(VISIT_TYPE_LABELS).map((k) => {
+    const sel = (k === cur) ? "selected" : "";
+    return `<option value="${escapeHtml(k)}" ${sel}>${escapeHtml(fmtVisitType_(k))}</option>`;
+  }).join("");
+}
+
 export function renderRegisterTab(app) {
   render(app, `
     <section class="section">
       <h1 class="h1">予約登録</h1>
-      <p class="p text-sm text-muted" style="margin-top:-8px; margin-bottom:24px;">依頼メールから予約候補を自動生成し、確認後に一括登録できます</p>
 
-      <!-- メール入力 -->
+      <!-- 予約候補の一括生成（AIなし） -->
       <div class="card" style="margin-bottom:20px;">
-        <label class="label" style="margin-bottom:8px; display:block; font-weight:600;">メール本文</label>
-        <textarea id="reg_email" class="textarea" rows="8" placeholder="顧客からの依頼メールを貼り付けてください&#x0a;例: 1月10日から12日まで、朝夕2回ずつシッティングをお願いします。"></textarea>
-        
-        <!-- 補足情報（折りたたみ可能に） -->
-        <details style="margin-top:16px;">
+        <p class="p" style="margin:0 0 12px 0;"><b>予約候補の一括生成</b></p>
+
+        <div class="hint-row" style="margin-bottom:10px;">
+          <label class="hint-label" style="min-width:140px;">顧客名</label>
+          <div style="display:flex; align-items:center; flex-wrap:wrap;">
+            <span id="reg_customer_label" class="p" style="margin:0;"></span>
+          </div>
+        </div>
+
+       <div class="hint-row" style="margin-bottom:10px;">
+          <label class="hint-label" style="min-width:140px;">期間</label>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input id="reg_from" type="date" class="input mono" style="width: 160px;" />
+            <span style="color:#666;">〜</span>
+            <input id="reg_to" type="date" class="input mono" style="width: 160px;" />
+          </div>
+        </div>
+
+        <div class="hint-row" style="margin-bottom:10px;">
+          <label class="hint-label" style="min-width:140px;">間隔</label>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select id="reg_every_n" class="input" style="width: 160px;">
+              <option value="1">毎日</option>
+              <option value="2">隔日</option>
+              <option value="3">2日おき</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="hint-row" style="margin-bottom:10px;">
+          <label class="hint-label" style="min-width:140px;">時刻スロット</label>
+          <div style="display:flex; flex-direction:column; gap:8px; width:100%;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <input id="reg_time_add" type="time" class="input mono" style="width:160px;" />
+              <button id="reg_time_add_btn" class="btn btn-sm" type="button" style="min-width:auto;">＋追加</button>
+            </div>
+            <div id="reg_times_chips" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+            <!-- 互換用（ロジックの最低差分のため残す・非表示） -->
+            <textarea id="reg_times" class="textarea mono is-hidden" rows="2" aria-hidden="true"></textarea>
+          </div>
+        </div>
+
+        <div id="reg_edge_once_row" class="hint-row is-hidden" style="margin-bottom:10px;">
+          <label class="hint-label" style="min-width:140px;">便利設定</label>
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <label style="display:flex; align-items:center; gap:6px;">
+              <input id="reg_first_day_once" type="checkbox" />
+              <span>初日だけ1回</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px;">
+              <input id="reg_last_day_once" type="checkbox" />
+              <span>最終日だけ1回</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="hint-row" style="margin-bottom:10px;">
+          <label class="hint-label" style="min-width:140px;">共通設定</label>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <select id="reg_common_course" class="input" style="width: 160px;"></select>
+            <select id="reg_common_type" class="input" style="width: 160px;"></select>
+          </div>
+        </div>
+
+        <div class="hint-row" style="margin-bottom:0;">
+          <label class="hint-label" style="min-width:140px;">共通メモ</label>
+          <textarea id="reg_common_memo" class="textarea" rows="2" placeholder="すべての予約メモに一括で書き込みます。各予約に個別でメモを書き込む場合、予約候補を生成後に個別に入力できます。"></textarea>
+        </div>
+
+        <details style="margin-top:14px;">
           <summary style="cursor:pointer; font-weight:600; color:#666; padding:8px 0;">
-            📝 補足情報を追加（タップで展開）
+            除外日
           </summary>
-          <div style="margin-top:12px;">
-            <p class="p text-sm text-muted" style="margin-bottom:12px;">補足情報を追加するとAIの解釈精度が向上します</p>
-            
-            <div class="hint-row" style="margin-bottom:10px;">
-              <label class="hint-label" style="min-width:140px;">訪問期間</label>
-              <input id="reg_hint_date" class="input" placeholder="例: 1/1 から 1/5" />
+          <div style="margin-top:10px;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+              <input id="reg_exclude_add" type="date" class="input mono" style="width: 160px;" />
+              <button id="reg_exclude_add_btn" class="btn btn-sm" type="button" style="min-width:auto;">＋追加</button>
             </div>
-            <div class="hint-row" style="margin-bottom:10px;">
-              <label class="hint-label" style="min-width:140px;">訪問回数</label>
-              <input id="reg_hint_count" class="input" placeholder="例: 合計5回 / 初日と最終日は1回" />
-            </div>
-            <div class="hint-row" style="margin-bottom:10px;">
-              <label class="hint-label" style="min-width:140px;">訪問時間</label>
-              <input id="reg_hint_time" class="input" placeholder="例: 朝 / 夕方 / 14時 / 1/1は夜" />
-            </div>
-            <div class="hint-row" style="margin-bottom:10px;">
-              <label class="hint-label" style="min-width:140px;">訪問タイプ</label>
-              <input id="reg_hint_type" class="input" placeholder="例: シッティング / トレーニング / 打ち合わせ" />
-            </div>
-            <div class="hint-row" style="margin-bottom:10px;">
-              <label class="hint-label" style="min-width:140px;">メモ</label>
-              <textarea id="reg_hint_memo" class="textarea" rows="2" placeholder="例: 最終回：鍵はポスト返却。"></textarea>
-            </div>
+            <div id="reg_exclude_chips" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;"></div>
           </div>
         </details>
       </div>
@@ -432,12 +416,23 @@ export function renderRegisterTab(app) {
     </div>
   `);
 
-  const emailEl = qs("#reg_email");
-  const hintDateEl = qs("#reg_hint_date");
-  const hintCountEl = qs("#reg_hint_count");
-  const hintTimeEl = qs("#reg_hint_time");
-  const hintTypeEl = qs("#reg_hint_type");
-  const hintMemoEl = qs("#reg_hint_memo");
+  const fromEl = qs("#reg_from");
+  const toEl = qs("#reg_to");
+  const everyNEl = qs("#reg_every_n");
+  const timesEl = qs("#reg_times");
+  const timeAddEl = qs("#reg_time_add");
+  const timeAddBtn = qs("#reg_time_add_btn");
+  const timesChipsEl = qs("#reg_times_chips");
+  const edgeOnceRowEl = qs("#reg_edge_once_row");
+  const firstDayOnceEl = qs("#reg_first_day_once");
+  const lastDayOnceEl = qs("#reg_last_day_once");
+  const commonCourseEl = qs("#reg_common_course");
+  const commonTypeEl = qs("#reg_common_type");
+  const commonMemoEl = qs("#reg_common_memo");
+  const customerLabelEl = qs("#reg_customer_label");
+  const excludeAddEl = qs("#reg_exclude_add");
+  const excludeAddBtn = qs("#reg_exclude_add_btn");
+  const excludeChipsEl = qs("#reg_exclude_chips");  
   const assignWrapEl = qs("#reg_assign");
   const assignStaffNameEl = qs("#reg_assign_staff_name");
   const assignSummaryTextEl = qs("#reg_assign_summary_text");
@@ -452,11 +447,25 @@ export function renderRegisterTab(app) {
   let _busy = false;
   let _draftObj = null; // { visits:[], warnings:[] }
 
+  let _timeSlots = [];      // ["09:00", "17:00"]
+  let _excludeDates = [];   // ["2026-02-20", ...]
+
   _fixedCustomerId = getFixedCustomerIdFromHash_();
+  _fixedCustomerLabel = getFixedCustomerLabelFromHash_();
+
   if (!_fixedCustomerId) {
     toast({ message: "customer_id がありません。顧客詳細から予約登録を開いてください。" });
     return;
   }
+
+  // 対象（顧客名）表示：label が無ければ customer_id を表示
+  if (customerLabelEl) {
+    const label = String(_fixedCustomerLabel || "").trim();
+    const cid = String(_fixedCustomerId || "").trim();
+    customerLabelEl.textContent = label ? label : cid;
+  }
+
+  try { refreshUI_(); } catch (e) {}
 
   let _hardErrors = [];
   let _lastCommitSucceeded = false;
@@ -464,7 +473,21 @@ export function renderRegisterTab(app) {
   let _lastCommitRequestId = "";
   let _memoDebounceTimer = null;
 
-  ensureCourseOptions_().then(() => { try { refreshUI_(); } catch (e) {} });
+  function populateCommonTypeOptions_() {
+    if (!commonTypeEl) return;
+    const cur = String(commonTypeEl.value || "sitting").trim() || "sitting";
+    commonTypeEl.innerHTML = visitTypeSelectHtml_(cur);
+  }
+
+  function populateCommonCourseOptions_() {
+    if (!commonCourseEl) return;
+    // courseOptions のキャッシュを使って select を構築
+    const cur = String(commonCourseEl.value || "30min").trim() || "30min";
+    commonCourseEl.innerHTML = courseSelectHtml_(cur);
+  }
+
+  ensureCourseOptions_().then(() => { try { populateCommonCourseOptions_(); populateCommonTypeOptions_(); refreshUI_(); } catch (e) {} });
+  try { populateCommonTypeOptions_(); } catch (e) {}
 
   updateAssignUi_();
   window.addEventListener("mf:auth:changed", updateAssignUi_);
@@ -530,49 +553,60 @@ export function renderRegisterTab(app) {
     warningsEl.classList.remove("is-hidden");
   }
 
-  function renderPreview_(draft) {
-    if (!previewEl) return;
-    const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
-    if (!visits.length) {
-      previewEl.classList.add("is-hidden");
-      previewEl.innerHTML = "";
-      return;
+  function sortAndRenumberDraft_() {
+    if (!_draftObj || !Array.isArray(_draftObj.visits)) return;
+    const visits = _draftObj.visits;
+    visits.sort((a, b) => {
+      const ad = String(a.date || "");
+      const bd = String(b.date || "");
+      if (ad !== bd) return ad < bd ? -1 : 1;
+      const as = fmtHm_(a.start_time);
+      const bs = fmtHm_(b.start_time);
+      if (as !== bs) return as < bs ? -1 : 1;
+      return 0;
+    });
+    visits.forEach((v, i) => { v.row_num = i + 1; });
+  }
+
+  function syncTimeTextarea_() {
+    if (!timesEl) return;
+    timesEl.value = _timeSlots.join("\n");
+  }
+
+  function isValidYmd_(s) {
+    const v = String(s || "").trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(v);
+  }
+
+  function diffDaysJst_(fromYmd, toYmd) {
+    // JST(+09:00) 固定で “日” 差を計算
+    if (!isValidYmd_(fromYmd) || !isValidYmd_(toYmd)) return 0;
+    const a = new Date(`${fromYmd}T00:00:00+09:00`);
+    const b = new Date(`${toYmd}T00:00:00+09:00`);
+    if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
+    const ms = b.getTime() - a.getTime();
+    return Math.floor(ms / (24 * 60 * 60 * 1000));
+  }
+
+  function refreshEdgeOnceVisibility_() {
+    if (!edgeOnceRowEl) return;
+    const fromYmd = String(fromEl?.value || "").trim();
+    const toYmd = String(toEl?.value || "").trim();
+
+    // 条件：
+    // - 期間が2日以上（差分が1日以上）
+    // - 時刻スロットが2つ以上
+    const daysDiff = diffDaysJst_(fromYmd, toYmd);
+    const hasRange2plus = (daysDiff >= 1); // 例: 2/01〜2/02 で 1
+    const hasTwoSlots = Array.isArray(_timeSlots) && _timeSlots.length >= 2;
+    const shouldShow = !!(hasRange2plus && hasTwoSlots);
+
+    edgeOnceRowEl.classList.toggle("is-hidden", !shouldShow);
+    if (!shouldShow) {
+      // 非表示になったら安全のため OFF（生成ロジックへの影響を確実に遮断）
+      if (firstDayOnceEl) firstDayOnceEl.checked = false;
+      if (lastDayOnceEl) lastDayOnceEl.checked = false;
     }
-    const html = visits.map((v, idx) => {
-      const date = escapeHtml(v.date || "");
-      const st = fmtHm_(v.start_time);
-      const ed = fmtHm_(v.end_time);
-      const timeRaw = [st, ed].filter(Boolean).join(" - ");
-      const time = escapeHtml(timeRaw);
-      const customer = escapeHtml(v.customer_name || "");
-      const staff = escapeHtml(v.staff_name || v.staff_id || "");
-      const type = escapeHtml(fmtVisitType_(v.visit_type));
-      const course = escapeHtml(v.course || "");
-      const memo = escapeHtml(v.memo || "");
-      const hint = escapeHtml(v.time_hint || "");
-      return `
-        <div class="preview-row">
-          <div class="preview-row-top">
-            <div class="preview-title">#${idx + 1} ${customer || "（顧客名なし）"}</div>
-            <div class="preview-date">${date} ${time}</div>
-          </div>
-          <div class="preview-meta">
-            ${staff ? `<span class="badge">${staff}</span>` : ""}
-            ${type ? `<span class="badge badge-visit-type">${type}</span>` : ""}
-            ${course ? `<span class="badge">${course}</span>` : ""}
-            ${hint ? `<span class="badge">${hint}</span>` : ""}
-          </div>
-          ${memo ? `<div class="preview-memo">${memo}</div>` : ""}
-        </div>
-      `;
-    }).join("");
-    previewEl.innerHTML = `
-      <div class="card">
-        <p class="p"><b>登録候補プレビュー</b>（ドラフトを確認してください）</p>
-        <div class="preview-table">${html}</div>
-      </div>
-    `;
-    previewEl.classList.remove("is-hidden");
   }
 
   function computeHardErrors_(draft) {
@@ -601,6 +635,90 @@ export function renderRegisterTab(app) {
     return `<span class="badge badge-warn">⚠ ${escapeHtml(label)}</span>`;
   }
 
+  function renderTimeChips_() {
+    if (!timesChipsEl) return;
+    const uniq = [];
+    const seen = new Set();
+    _timeSlots.map(t => fmtHm_(t)).filter(Boolean).forEach(t => {
+      if (seen.has(t)) return;
+      seen.add(t);
+      uniq.push(t);
+    });
+   _timeSlots = uniq;
+   syncTimeTextarea_();
+   refreshEdgeOnceVisibility_();
+   const html = _timeSlots.map((t) => {
+      return `
+        <button type="button" class="btn btn-sm" data-chip="time" data-value="${escapeHtml(t)}"
+          style="min-width:auto; padding:6px 10px; border-radius:999px;">
+          ${escapeHtml(t)} <span style="margin-left:6px; opacity:.7;">×</span>
+        </button>
+      `;
+    }).join("");
+    timesChipsEl.innerHTML = html || `<span class="text-sm text-muted">時刻を選択・追加してください（複数追加可）</span>`;
+  }
+
+  function renderExcludeChips_() {
+    if (!excludeChipsEl) return;
+    const uniq = Array.from(new Set(_excludeDates)).filter(isYmd_).sort();
+    _excludeDates = uniq;
+    const html = uniq.map((d) => {
+      return `
+        <button type="button" class="btn btn-sm" data-chip="exclude" data-value="${escapeHtml(d)}"
+          style="min-width:auto; padding:6px 10px; border-radius:999px;">
+          ${escapeHtml(d)} <span style="margin-left:6px; opacity:.7;">×</span>
+        </button>
+      `;
+    }).join("");
+    excludeChipsEl.innerHTML = html || `<span class="text-sm text-muted">除外日を選択・追加してください（複数追加可）</span>`;
+  }
+
+  // chips クリックで削除
+  if (timesChipsEl) {
+    timesChipsEl.addEventListener("click", (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest('button[data-chip="time"]') : null;
+      if (!btn) return;
+      const v = String(btn.getAttribute("data-value") || "");
+      _timeSlots = _timeSlots.filter(t => fmtHm_(t) !== fmtHm_(v));
+      renderTimeChips_();
+    });
+  }
+  if (excludeChipsEl) {
+    excludeChipsEl.addEventListener("click", (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest('button[data-chip="exclude"]') : null;
+      if (!btn) return;
+      const v = String(btn.getAttribute("data-value") || "");
+      _excludeDates = _excludeDates.filter(d => String(d) !== v);
+      renderExcludeChips_();
+    });
+  }
+
+  if (timeAddBtn) {
+    timeAddBtn.addEventListener("click", () => {
+      const t = fmtHm_(timeAddEl?.value);
+      if (!t) return toast({ message: "時刻を選択してください（例: 09:00）" });
+      _timeSlots.push(t);
+      renderTimeChips_();
+    });
+  }
+  if (excludeAddBtn) {
+    excludeAddBtn.addEventListener("click", () => {
+      const d = String(excludeAddEl?.value || "").trim();
+      if (!isYmd_(d)) return toast({ message: "除外日を選択してください" });
+      _excludeDates.push(d);
+      renderExcludeChips_();
+    });
+  }
+
+  if (fromEl) {
+    fromEl.addEventListener("change", refreshEdgeOnceVisibility_);
+    fromEl.addEventListener("input", refreshEdgeOnceVisibility_);
+  }
+  if (toEl) {
+    toEl.addEventListener("change", refreshEdgeOnceVisibility_);
+    toEl.addEventListener("input", refreshEdgeOnceVisibility_);
+  }
+
   function renderEditor_(draft) {
     if (!previewEl) return;
     const visits = (draft && Array.isArray(draft.visits)) ? draft.visits : [];
@@ -625,10 +743,7 @@ export function renderRegisterTab(app) {
         (!course) ? fmtWarnBadge_("コース仮設定") : "",
       ].filter(Boolean).join(" ");
 
-      const typeOptions = Object.keys(VISIT_TYPE_LABELS).map(k => {
-        const sel = (k === vt) ? "selected" : "";
-        return `<option value="${escapeHtml(k)}" ${sel}>${escapeHtml(VISIT_TYPE_LABELS[k])}</option>`;
-      }).join("");
+      const typeOptions = visitTypeSelectHtml_(vt);
 
       return `
         <div class="preview-card" data-idx="${idx}" style="padding:12px; margin-bottom:12px; border:1px solid #ddd; border-radius:8px;">
@@ -691,7 +806,7 @@ export function renderRegisterTab(app) {
         <div style="margin-bottom:16px;">
           <h2 style="font-size:16px; font-weight:600; margin:0 0 4px 0;">登録候補（${visits.length}件）</h2>
           <p class="p text-sm text-muted" style="margin:0;">
-            ⚠️ AIの解釈は正確とは限りません。必要に応じて修正してください。
+            <b>顧客：</b>${escapeHtml(_fixedCustomerLabel || _fixedCustomerId || "（不明）")}
           </p>
         </div>
         <div class="preview-wrap">${cards}</div>
@@ -701,6 +816,7 @@ export function renderRegisterTab(app) {
   }
 
   function refreshUI_() {
+    try { sortAndRenumberDraft_(); } catch (e) {}
     _hardErrors = computeHardErrors_(_draftObj);
 
     let warnings = (_draftObj && Array.isArray(_draftObj.warnings)) ? _draftObj.warnings : [];
@@ -713,31 +829,6 @@ export function renderRegisterTab(app) {
     const hasDraft = !!(_draftObj && Array.isArray(_draftObj.visits) && _draftObj.visits.length);
     const hasHardError = !!(_hardErrors && _hardErrors.length);
     commitBtn.disabled = _busy || !hasDraft || hasHardError;
-  }
-
-  function buildHintText_() {
-    const hints = [
-      { label: "訪問期間", el: hintDateEl },
-      { label: "訪問回数", el: hintCountEl },
-      { label: "訪問時間", el: hintTimeEl },
-      { label: "訪問タイプ", el: hintTypeEl },
-      { label: "メモ", el: hintMemoEl },
-    ];
-
-    const items = hints
-      .map(({ label, el }) => ({ label, value: String(el?.value || "").trim() }))
-      .filter(({ value }) => !!value);
-
-    if (!items.length) return "";
-
-    // GPTに「本文が曖昧ならこの補足を優先せよ」という意図を明確化
-    const lines = items.map(({ label, value }) => `- ${label}: ${value}`);
-
-    return [
-      "【補足（解釈のための制約条件）】",
-      "本文が曖昧な場合は、以下の補足を優先して解釈してください。",
-      ...lines,
-    ].join("\n");
   }
 
   if (previewEl) {
@@ -754,15 +845,16 @@ export function renderRegisterTab(app) {
 
       if (action === "del") {
         visits.splice(idx, 1);
+        sortAndRenumberDraft_();
         refreshUI_();
         return;
       }
       if (action === "dup") {
         const src = visits[idx];
         if (!src) return;
-        const maxRow = visits.reduce((m, v) => Math.max(m, Number(v.row_num || 0)), 0);
-        const copy = { ...src, row_num: maxRow + 1 };
+        const copy = { ...src };
         visits.splice(idx + 1, 0, copy);
+        sortAndRenumberDraft_();
         refreshUI_();
         return;
       }
@@ -798,6 +890,7 @@ export function renderRegisterTab(app) {
         }
         v.start_time = iso;
         v.time_hint = "fixed";
+        sortAndRenumberDraft_();
 
       } else if (field === "start_time") {
         // time入力は "HH:mm" なので、draft(JSON)はISO(+09:00)に戻して統一する
@@ -808,6 +901,7 @@ export function renderRegisterTab(app) {
         }
         v.start_time = iso;
         v.time_hint = "fixed";
+        sortAndRenumberDraft_();
       } else if (field === "course") {
         v.course = String(el.value || "").trim();
       } else if (field === "visit_type") {
@@ -831,47 +925,140 @@ export function renderRegisterTab(app) {
     });
   }
 
+  function parseExcludeDateSet_() {
+    // チップUI
+    const set = new Set();
+    (_excludeDates || []).forEach(d => { if (isYmd_(d)) set.add(String(d)); });
+    return set;
+  }
+
+  function parseTimeSlots_() {
+    // チップUI（優先） + textarea（互換）
+    const list = [];
+    (_timeSlots || []).forEach(t => { const hm = fmtHm_(t); if (hm) list.push(hm); });
+    const raw = String(timesEl?.value || "");
+    raw.split(/[\s,、]+/).forEach(s => { const hm = fmtHm_(s); if (hm) list.push(hm); });
+    // 重複排除（入力順を維持）
+    const out = [];
+    const seen = new Set();
+    list.forEach((t) => { if (!seen.has(t)) { seen.add(t); out.push(t); } });
+    return out;
+  }
+
+  function normalizeDateInput_(v) {
+    const s = String(v || "").trim();
+    if (!s) return "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+  }
+
+  function ymdToDateJst_(ymd) {
+    // input[type=date] はローカルTZで解釈されるが、念のため +09:00 固定で生成
+   return new Date(`${ymd}T00:00:00+09:00`);
+  }
+
+  function toYmd_(d) {
+    const dt = (d instanceof Date) ? d : new Date(d);
+    const yyyy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function generateDraftFromUi_() {
+    const fromYmd = normalizeDateInput_(fromEl?.value) || toYmd_(new Date());
+    const toYmd = normalizeDateInput_(toEl?.value) || fromYmd;
+    const fromD = ymdToDateJst_(fromYmd);
+    const toD = ymdToDateJst_(toYmd);
+    if (isNaN(fromD.getTime()) || isNaN(toD.getTime())) throw new Error('期間の日付が不正です');
+    if (fromD.getTime() > toD.getTime()) throw new Error('期間の from/to が逆です');
+
+    const everyN = Math.max(1, Number(everyNEl?.value || 1) || 1);
+    const excludeSet = parseExcludeDateSet_();
+    const times = parseTimeSlots_();
+    if (!times.length) throw new Error('時刻スロットを1つ以上入力してください（例: 09:00）');
+    const firstDayOnce = !!(firstDayOnceEl && firstDayOnceEl.checked);
+    const lastDayOnce  = !!(lastDayOnceEl && lastDayOnceEl.checked);
+
+    const course = String(commonCourseEl?.value || '30min').trim() || '30min';
+    const visitType = String(commonTypeEl?.value || 'sitting').trim() || 'sitting';
+    const memo = String(commonMemoEl?.value || '');
+
+    const visits = [];
+    let rowNum = 1;
+    const firstYmd = fromYmd;
+    const lastYmd = toYmd;
+    for (let d = new Date(fromD); d.getTime() <= toD.getTime(); d.setDate(d.getDate() + everyN)) {
+      const ymd = toYmd_(d);
+      if (excludeSet.has(ymd)) continue;
+      let slotList = times;
+      // 初日だけ1回：初日は「最後の時刻のみ」
+      if (firstDayOnce && times.length >= 2 && ymd === firstYmd) {
+        slotList = [times[times.length - 1]];
+      }
+      // 最終日だけ1回：最終日は「最初の時刻のみ」
+      if (lastDayOnce && times.length >= 2 && ymd === lastYmd) {
+        slotList = [times[0]];
+      }
+
+      slotList.forEach((hm) => {
+        const iso = isoFromDateAndHmJst_(ymd, hm);
+        if (!iso) return;
+        visits.push({
+          row_num: rowNum++,
+          customer_id: String(_fixedCustomerId || '').trim(),
+          date: ymd,
+          start_time: iso,
+          course: course,
+          visit_type: visitType,
+          memo: memo,
+          time_hint: 'fixed'
+        });
+      });
+    }
+
+    // 同日・同開始時刻の重複は生成段階で潰す（commit前ハードエラーも維持）
+    const keySet = new Set();
+    const uniq = [];
+    visits.forEach(v => {
+      const k = `${v.date}__${v.start_time}`;
+      if (keySet.has(k)) return;
+      keySet.add(k);
+      uniq.push(v);
+    });
+    return { visits: uniq, warnings: [] };
+  }
+
+  try { renderTimeChips_(); } catch (e) {}
+  try { renderExcludeChips_(); } catch (e) {}
+  try { syncTimeTextarea_(); } catch (e) {}
+  try { refreshEdgeOnceVisibility_(); } catch (e) {}
+
   interpretBtn.addEventListener("click", async () => {
-    console.log("[register] interpret button clicked");
-    console.log("[register] emailEl exists =", !!emailEl);
-    console.log("[register] email length =", emailEl && emailEl.value ? String(emailEl.value).length : 0);
+    console.log("[register] generate button clicked");
     if (_busy) return;
-    const emailText = String(emailEl.value || "").trim();
-    if (!emailText) return toast({ message: "依頼文を貼り付けてください" });
-
-    const hintText = buildHintText_();
-    const mergedText = hintText ? `${emailText}\n\n${hintText}\n` : emailText;
-
-    setBusy(true, "AIが解釈しています...");
-    resultEl.innerHTML = "";
-    renderWarnings_([]);
-    renderPreview_(null);
-
     try {
-      const adminAssignStaffName = (assignStaffNameEl && String(assignStaffNameEl.value || "").trim()) || "";
-      console.log("[register] step1: before callInterpreterViaGas_");
-      const data = await callInterpreterViaGas_(mergedText, adminAssignStaffName);
-      console.log("[register] step2: callInterpreterViaGas_ ok=", !!(data && data.ok));
+      setBusy(true, "候補を生成しています...");
+      resultEl.innerHTML = "";
+      renderWarnings_([]);
 
-      _draftObj = data.draft;
-      (Array.isArray(_draftObj?.visits) ? _draftObj.visits : []).forEach(v => { v.customer_id = _fixedCustomerId; });
+      const draft = generateDraftFromUi_();
+      const visits = Array.isArray(draft && draft.visits) ? draft.visits : [];
+      if (!visits.length) {
+        toast({ message: "条件に一致する候補が0件です（期間/曜日/除外日を確認してください）" });
+        _draftObj = null;
+        refreshUI_();
+        return;
+      }
+
+      _draftObj = draft;
+      // 登録事故防止：customer_id は固定注入
+      visits.forEach(v => { v.customer_id = _fixedCustomerId; });
+      sortAndRenumberDraft_();
       refreshUI_();
       resultEl.innerHTML = `<div class="card"><p class="p">登録候補を生成しました。顧客を選択し、内容を確認して「登録実行」を押してください。</p></div>`;
     } catch (e) {
       const msg = (e && e.message) ? e.message : String(e);
       toast({ message: msg });
-      // 診断情報（エラー時のみ）
-      const user = getUser() || {};
-      const diag = {
-        client_time: nowIsoJst_(),
-        page: "register",
-        phase: "interpret",
-        role: user.role || "",
-        staff_id: user.staff_id || "",
-        org_id: user.org_id || "",
-        error_message: msg,
-      };
-      await showDiagnosticModal_({ title: "診断情報（解釈エラー）", diagText: safeJson_(diag) });
     } finally {
       setBusy(false);
     }
@@ -952,24 +1139,9 @@ export function renderRegisterTab(app) {
       `;
       toast({ title: ui.toastTitle, message: ui.toastMsg });
 
-      // 一部未完了/失敗のときだけ診断コピーを提示
       if (!sum.allSuccess) {
-        try { setBusy(false); } catch (e) {}
         const metaRid = (resp && resp._meta && resp._meta.request_id) ? resp._meta.request_id : _lastCommitRequestId;
-        const user = getUser() || {};
-        const diag = {
-          client_time: nowIsoJst_(),
-          page: "register",
-          phase: "commit",
-          action: "bulkRegisterVisits",
-          request_id: metaRid,
-          content_hash: _lastCommitHash,
-          role: user.role || "",
-          staff_id: user.staff_id || "",
-          org_id: user.org_id || "",
-          commit_summary: sum,
-        };
-        await showDiagnosticModal_({ title: "診断情報（登録が一部未完了）", diagText: safeJson_(diag) });
+        resultEl.innerHTML += `<div class="card card-warning"><p class="p text-sm">追跡ID: <b>${escapeHtml(String(metaRid || ""))}</b></p></div>`;
       }
     } catch (e) {
       _lastCommitSucceeded = false;
@@ -977,23 +1149,13 @@ export function renderRegisterTab(app) {
       toast({ message: msg });
       try { setBusy(false); } catch (e2) {}
 
-      // ApiError なら request_id を拾う（GAS RequestLogs 追跡用）
+      // request_id が取れるなら画面にだけ出す（RequestLogs追跡用）
       const rid = (e && (e.request_id || (e.detail && e.detail.request_id))) ? (e.request_id || e.detail.request_id) : _lastCommitRequestId;
-      const user = getUser() || {};
-      const diag = {
-        client_time: nowIsoJst_(),
-        page: "register",
-        phase: "commit",
-        action: "bulkRegisterVisits",
-        request_id: rid,
-        content_hash: _lastCommitHash,
-        role: user.role || "",
-        staff_id: user.staff_id || "",
-        org_id: user.org_id || "",
-        error_message: msg,
-        error_detail: (e && e.detail) ? e.detail : null,
-      };
-      await showDiagnosticModal_({ title: "診断情報（登録エラー）", diagText: safeJson_(diag) });
+      if (rid) {
+        resultEl.innerHTML = `<div class="card card-warning"><p class="p">登録エラー</p><p class="p text-sm">追跡ID: <b>${escapeHtml(String(rid))}</b></p></div>`;
+      } else {
+        resultEl.innerHTML = `<div class="card card-warning"><p class="p">登録エラー</p></div>`;
+      }
     } finally {
       setBusy(false);
     }
