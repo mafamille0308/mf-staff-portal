@@ -529,6 +529,7 @@ export function renderRegisterTab(app) {
 
   ensureCourseOptions_().then(() => { try { populateCommonCourseOptions_(); refreshUI_(); } catch (e) {} });
   ensureVisitTypeOptions_().then(() => { try { populateCommonTypeOptions_(); refreshUI_(); } catch (e) {} });
+  try { populateCommonCourseOptions_(); } catch (e) {}
   try { populateCommonTypeOptions_(); } catch (e) {}
 
   updateAssignUi_();
