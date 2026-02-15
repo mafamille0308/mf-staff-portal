@@ -27,6 +27,46 @@ const VISIT_TYPE_LABELS = {
   meeting_paid: "打ち合わせ（有料）",
 };
 
+// visit_type options（GAS取得 + フォールバック）
+let _visitTypeOptionsCache = null; // [{ key, label }]
+
+function fallbackVisitTypeOptions_() {
+  return Object.keys(VISIT_TYPE_LABELS).map((k) => ({ key: k, label: VISIT_TYPE_LABELS[k] }));
+}
+
+async function ensureVisitTypeOptions_() {
+  if (_visitTypeOptionsCache && _visitTypeOptionsCache.length) return _visitTypeOptionsCache;
+  try {
+    const idToken = getIdToken();
+    if (!idToken) throw new Error("未ログインです。ログインし直してください。");
+    const resp = await callGas({ action: "getVisitTypeOptions" }, idToken);
+    const u = unwrapResults(resp);
+    const results = (u && Array.isArray(u.results)) ? u.results : [];
+    const list = results
+      .map((x) => ({
+        key: String(x.key || x.value || "").trim(),
+        label: String(x.label || x.name || "").trim(),
+      }))
+      .filter((x) => !!x.key);
+    _visitTypeOptionsCache = list.length ? list : fallbackVisitTypeOptions_();
+  } catch (e) {
+    _visitTypeOptionsCache = fallbackVisitTypeOptions_();
+  }
+  return _visitTypeOptionsCache;
+}
+
+function visitTypeSelectHtml_(currentKey) {
+  const cur = String(currentKey || "").trim() || "sitting";
+  const opts = (_visitTypeOptionsCache && _visitTypeOptionsCache.length) ? _visitTypeOptionsCache : fallbackVisitTypeOptions_();
+  const has = opts.some((o) => String(o.key) === cur);
+  const all = has ? opts : [{ key: cur, label: cur }, ...opts]; // 互換用：未知キーでも落とさない
+  return all.map((o) => {
+    const k = String(o.key);
+    const sel = (k === cur) ? "selected" : "";
+    return `<option value="${escapeHtml(k)}" ${sel}>${escapeHtml(o.label || k)}</option>`;
+  }).join("");
+}
+
 function nowIsoJst_() {
   const d = new Date();
   // “表示用”でOK。厳密TZ変換は後回し！EVP優先！
@@ -265,7 +305,16 @@ function newRequestId_() {
 }
 
 function fmtVisitType_(type) {
-  return VISIT_TYPE_LABELS[type] || String(type || "");
+  const k = String(type || "").trim();
+  // 取得済みoptionsがあればそれを優先
+  try {
+    const opts = (_visitTypeOptionsCache && _visitTypeOptionsCache.length) ? _visitTypeOptionsCache : null;
+    if (opts) {
+      const hit = opts.find((o) => String(o.key) === k);
+      if (hit && hit.label) return hit.label;
+    }
+  } catch (e) {}
+  return VISIT_TYPE_LABELS[k] || k;
 }
 
 function visitTypeSelectHtml_(currentType) {
@@ -486,7 +535,14 @@ export function renderRegisterTab(app) {
     commonCourseEl.innerHTML = courseSelectHtml_(cur);
   }
 
-  ensureCourseOptions_().then(() => { try { populateCommonCourseOptions_(); populateCommonTypeOptions_(); refreshUI_(); } catch (e) {} });
+  function populateCommonTypeOptions_() {
+    if (!commonTypeEl) return;
+    const cur = String(commonTypeEl.value || "sitting").trim() || "sitting";
+    commonTypeEl.innerHTML = visitTypeSelectHtml_(cur);
+  }
+
+  ensureCourseOptions_().then(() => { try { populateCommonCourseOptions_(); refreshUI_(); } catch (e) {} });
+  ensureVisitTypeOptions_().then(() => { try { populateCommonTypeOptions_(); refreshUI_(); } catch (e) {} });
   try { populateCommonTypeOptions_(); } catch (e) {}
 
   updateAssignUi_();
