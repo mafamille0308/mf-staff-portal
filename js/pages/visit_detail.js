@@ -1,8 +1,43 @@
 // js/pages/visit_detail.js
 import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst, fmtDateJst, fmtAgeFromBirthdateJst } from "../ui.js";
-import { callGas, unwrapOne } from "../api.js";
+import { callGas, unwrapOne, unwrapResults } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 import { toggleVisitDone } from "./visit_done_toggle.js";
+
+const VISIT_TYPE_LABELS_FALLBACK = {
+  sitting: "シッティング",
+  training: "トレーニング",
+  meeting_free: "打ち合わせ（無料）",
+  meeting_paid: "打ち合わせ（有料）",
+};
+
+let _visitTypeLabelMapCache = null; // { [key]: label }
+
+function visitTypeLabel_(key) {
+  const k = String(key || "").trim();
+  if (!k) return "訪問種別未設定";
+  if (_visitTypeLabelMapCache && _visitTypeLabelMapCache[k]) return _visitTypeLabelMapCache[k];
+  return VISIT_TYPE_LABELS_FALLBACK[k] || k;
+}
+
+async function ensureVisitTypeLabelMap_(idToken) {
+  if (_visitTypeLabelMapCache) return _visitTypeLabelMapCache;
+  try {
+    const resp = await callGas({ action: "getVisitTypeOptions" }, idToken);
+    const u = unwrapResults(resp);
+    const results = (u && Array.isArray(u.results)) ? u.results : [];
+    const map = {};
+    for (const x of results) {
+      const kk = String(x?.key || x?.type || x?.value || "").trim();
+      const ll = String(x?.label || x?.name || "").trim();
+      if (kk) map[kk] = ll || kk;
+    }
+    _visitTypeLabelMapCache = Object.keys(map).length ? map : { ...VISIT_TYPE_LABELS_FALLBACK };
+  } catch (_) {
+    _visitTypeLabelMapCache = { ...VISIT_TYPE_LABELS_FALLBACK };
+  }
+  return _visitTypeLabelMapCache;
+}
 
 const KEY_VD_CACHE_PREFIX = "mf:visit_detail:cache:v1:";
 const VD_CACHE_TTL_MS = 2 * 60 * 1000; // 2分（体感改善）
@@ -38,15 +73,16 @@ function rawToggle_(rawText) {
   const s = normStr_(rawText);
   if (!s) return "";
   return `
-    <div class="hr"></div>
-    <details class="details">
-      <summary class="p" style="cursor:pointer; user-select:none;">
-        <strong>カルテ原本（OCR）</strong>（タップで表示）
-      </summary>
-      <div class="card" style="margin-top:8px;">
-        <div class="p" style="white-space:pre-wrap;">${escapeHtml(s)}</div>
-      </div>
-    </details>
+    <div style="margin-top:14px;">
+      <details class="details">
+        <summary class="p" style="cursor:pointer; user-select:none; margin:0;">
+          <strong>カルテ原本（OCR）</strong>（必要時のみ確認）
+        </summary>
+        <div class="card" style="margin-top:8px;">
+          <div class="p" style="white-space:pre-wrap;">${escapeHtml(s)}</div>
+        </div>
+      </details>
+    </div>
   `;
 }
 
@@ -63,26 +99,44 @@ function renderCareProfile_(cp) {
   const play     = pickFirst_(cp, ["play_care", "遊び", "遊び・お散歩のお世話"]);
   const other    = pickFirst_(cp, ["other_care", "その他", "室内環境・その他", "environment_other"]);
 
-  // どれも無い場合は、旧データの content だけでも表示
-  const any =
-    warnings || raw || content || food || toilet || walk || play || other;
+  const any = warnings || raw || content || food || toilet || walk || play || other;
   if (!any) return `<p class="p">お世話情報がありません。</p>`;
 
+  const anyStructured = warnings || content || food || toilet || walk || play || other;
+
+  const block_ = (label, text) => {
+    const s = normStr_(text);
+    if (!s) return "";
+    return `
+      <div style="margin-top:12px;">
+        <div style="opacity:.85; margin-bottom:4px;"><strong>${escapeHtml(label)}</strong></div>
+        <div style="white-space:pre-wrap;">${escapeHtml(s)}</div>
+      </div>
+    `;
+  };
+
   return `
-    ${lineBlock_("注意事項", warnings)}
-    ${lineBlock_("ごはん", food)}
-    ${lineBlock_("トイレ", toilet)}
-    ${lineBlock_("散歩", walk)}
-    ${lineBlock_("遊び", play)}
-    ${lineBlock_("その他", other)}
-    ${rawToggle_(raw)}
+    <div class="card">
+      <div class="p">
+        ${block_("注意事項", warnings)}
+        ${block_("ごはん", food)}
+        ${block_("トイレ", toilet)}
+        ${block_("散歩", walk)}
+        ${block_("遊び", play)}
+        ${block_("その他", other)}
+        ${(!anyStructured && raw) ? rawToggle_(raw) : (raw ? rawToggle_(raw) : "")}
+      </div>
+    </div>
   `;
 }
 
-function section(title, bodyHtml) {
+function section(title, bodyHtml, actionsHtml) {
   return `
-    <div class="hr"></div>
-    <h2 class="h2">${escapeHtml(title)}</h2>
+    <div style="margin-top:18px;"></div>
+    <div class="row row-between">
+      <h2 class="h2">${escapeHtml(title)}</h2>
+      <div>${actionsHtml || ""}</div>
+    </div>
     <div class="p">${bodyHtml || ""}</div>
   `;
 }
@@ -184,8 +238,8 @@ export async function renderVisitDetail(appEl, query) {
       <div>${escapeHtml(displayOrDash(fmt(visit.visit_id || "")))}</div>
       </div>
       <div class="row card-meta" style="gap:8px; flex-wrap:wrap;">
-      <span class="badge badge-visit-type">
-        ${escapeHtml(displayOrDash(fmt(visit.visit_type || ""), "訪問種別未設定"))}
+      <span class="badge badge-visit-type" id="vdVisitTypeBadge">
+        ${escapeHtml(visitTypeLabel_(visit.visit_type || ""))}
       </span>
       <span class="badge badge-billing-status">
         ${escapeHtml(displayOrDash(fmt((visit.billing_status || visit.request_status) || ""), "請求未確定"))}
@@ -220,13 +274,20 @@ export async function renderVisitDetail(appEl, query) {
     </div>
   `;
 
-  // 顧客詳細は後段で差し替える（先に “未取得” を出す）
-  const customerHtml = `<p class="p" id="customerDetailLoading">顧客詳細を読み込み中...</p>`;
-
   host.innerHTML = `
-    ${section("予約情報", visitHtml)}
-    ${section("顧客・ペット・お世話情報", customerHtml)}
+    ${section("予約情報", visitHtml, "")}
+    ${section("顧客情報", `<p class="p" id="vdCustomerLoading">顧客情報を読み込み中...</p>`, "")}
+    ${section("ペット情報", `<p class="p" id="vdPetsLoading">ペット情報を読み込み中...</p>`, "")}
+    ${section("お世話情報", `<p class="p" id="vdCareLoading">お世話情報を読み込み中...</p>`, "")}
   `;
+
+  // ===== 訪問タイプの日本語ラベル取得（失敗してもフォールバック表示）=====
+  ensureVisitTypeLabelMap_(idToken)
+    .then(() => {
+      const b = host.querySelector("#vdVisitTypeBadge");
+      if (b) b.textContent = visitTypeLabel_(visit.visit_type || "");
+    })
+    .catch(() => {});
 
   // ===== 後段で顧客詳細を取得して差し替え =====
   try {
@@ -239,60 +300,80 @@ export async function renderVisitDetail(appEl, query) {
     if (!res2 || res2.success === false) throw new Error((res2 && (res2.error || res2.message)) || "getVisitDetail failed");
 
     const customerDetail = res2.customer_detail || res2.customerDetail || null;
-    let html2 = `<p class="p">（顧客詳細は未取得）</p>`;
+
+    let customerInfoHtml = `<p class="p">（顧客情報は未取得）</p>`;
+    let petsHtml = `<p class="p">（ペット情報は未取得）</p>`;
+    let careHtml = `<p class="p">（お世話情報は未取得）</p>`;
+
     if (customerDetail && customerDetail.customer) {
       const c = customerDetail.customer;
       const pets = Array.isArray(customerDetail.pets) ? customerDetail.pets : [];
       const cp = customerDetail.careProfile || customerDetail.care_profile || null;
 
-      html2 = `
-      <div class="card">
-        <div class="p">
-          <div><strong>顧客名</strong>：${escapeHtml(fmt(c.name || ""))}</div>
-          <div><strong>電話</strong>：${escapeHtml(fmt(c.phone || ""))}</div>
-          <div><strong>住所</strong>：${escapeHtml(fmt(c.address_full || c.address || ""))}</div>
-          <div><strong>鍵</strong>：${escapeHtml(fmt(c.key_location || c.keyLocation || ""))}</div>
-        </div>
-      </div>
+      const customerId2 = String(visit.customer_id || visit.customerId || c.id || c.customer_id || "").trim();
+      const customerLabel2 = String(c.name || customerName || "").trim();
 
-      ${pets.length ? `
-        <div class="hr"></div>
-        <div class="p"><strong>ペット</strong></div>
-        ${pets.map(p => `
-          <div class="card">
-            <div class="p">
-              <div><strong>${escapeHtml(fmt(p.name || p.pet_name || ""))}</strong></div>
-              <div>種類：${escapeHtml(displayOrDash(fmt(p.species || p.type || p.pet_type || "")))}</div>
-              <div>品種：${escapeHtml(displayOrDash(fmt(p.breed || "")))}</div>
-              <div>誕生日：${escapeHtml(displayOrDash(fmtDateJst(p.birthdate || "")))}</div>
-              <div>年齢：${escapeHtml(displayOrDash(fmtAgeFromBirthdateJst(p.birthdate || "")))}</div>
-              <div>メモ：${escapeHtml(displayOrDash(fmt(p.notes || p.memo || "")))}</div>
-              <div>病院：${escapeHtml(displayOrDash(fmt(p.hospital || "")))}</div>
-              <div>病院電話：${escapeHtml(displayOrDash(fmt(p.hospital_phone || "")))}</div>
+      const customerDetailHref = customerId2
+        ? `#/customers?id=${encodeURIComponent(customerId2)}`
+        : "";
+
+      customerInfoHtml = `
+        <div class="card">
+          <div class="row row-between">
+            <div class="p"><strong>${escapeHtml(displayOrDash(customerLabel2))}</strong></div>
+            <div>
+              ${customerDetailHref ? `<a class="btn" href="${customerDetailHref}">顧客詳細へ</a>` : ``}
             </div>
           </div>
-        `).join("")}
-      ` : `<p class="p">ペット情報がありません。</p>`}
+          <div class="hr"></div>
+          <div class="p">
+            <div><strong>電話</strong>：${escapeHtml(displayOrDash(fmt(c.phone || "")))}</div>
+            <div><strong>住所</strong>：${escapeHtml(displayOrDash(fmt(c.address_full || c.address || "")))}</div>
+            <div><strong>鍵</strong>：${escapeHtml(displayOrDash(fmt(c.key_location || c.keyLocation || "")))}</div>
+          </div>
+        </div>
+      `;
 
-      ${cp ? `
-        <div class="hr"></div>
-        <div class="p"><strong>お世話情報</strong></div>
-        ${renderCareProfile_(cp)}
-      ` : `<p class="p">お世話情報がありません。</p>`}
-    `;
+      petsHtml = pets.length
+        ? pets.map(p => `
+            <div class="card">
+              <div class="p">
+                <div><strong>${escapeHtml(fmt(p.name || p.pet_name || ""))}</strong></div>
+                <div>種類：${escapeHtml(displayOrDash(fmt(p.species || p.type || p.pet_type || "")))}</div>
+                <div>品種：${escapeHtml(displayOrDash(fmt(p.breed || "")))}</div>
+                <div>誕生日：${escapeHtml(displayOrDash(fmtDateJst(p.birthdate || "")))}</div>
+                <div>年齢：${escapeHtml(displayOrDash(fmtAgeFromBirthdateJst(p.birthdate || "")))}</div>
+                <div>メモ：${escapeHtml(displayOrDash(fmt(p.notes || p.memo || "")))}</div>
+                <div>病院：${escapeHtml(displayOrDash(fmt(p.hospital || "")))}</div>
+                <div>病院電話：${escapeHtml(displayOrDash(fmt(p.hospital_phone || "")))}</div>
+              </div>
+            </div>
+          `).join("")
+        : `<p class="p">ペット情報がありません。</p>`;
+
+      careHtml = cp ? renderCareProfile_(cp) : `<p class="p">お世話情報がありません。</p>`;
     }
-    // 差し替え（該当セクションのみ）
-    const sec = host.querySelector("#customerDetailLoading");
-    if (sec) sec.outerHTML = html2;
 
-    // cache 保存（任意）
+    // 差し替え（各セクションのみ）
+    const secC = host.querySelector("#vdCustomerLoading");
+    if (secC) secC.outerHTML = customerInfoHtml;
+    const secP = host.querySelector("#vdPetsLoading");
+    if (secP) secP.outerHTML = petsHtml;
+    const secCp = host.querySelector("#vdCareLoading");
+    if (secCp) secCp.outerHTML = careHtml;
+
+    // cache 保存
     try {
       sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), visit: visit, customer_detail: customerDetail }));
     } catch (_) {}
   } catch (e) {
     // 顧客詳細が落ちても予約情報は見せる（体感優先）
-    const sec = host.querySelector("#customerDetailLoading");
-    if (sec) sec.outerHTML = `<p class="p">顧客詳細の取得に失敗しました。</p>`;
+    const secC = host.querySelector("#vdCustomerLoading");
+    if (secC) secC.outerHTML = `<p class="p">顧客情報の取得に失敗しました。</p>`;
+    const secP = host.querySelector("#vdPetsLoading");
+    if (secP) secP.outerHTML = `<p class="p">ペット情報の取得に失敗しました。</p>`;
+    const secCp = host.querySelector("#vdCareLoading");
+    if (secCp) secCp.outerHTML = `<p class="p">お世話情報の取得に失敗しました。</p>`;
   }
 
   // ===== done 切替（バッジタップ）=====
@@ -335,7 +416,7 @@ export async function renderVisitDetail(appEl, query) {
   const memoInput = host.querySelector("#memoInput");
   const memoText = host.querySelector("#memoText");
 
-  const currentMemo = fmt(visit.memo || "");
+  let currentMemo = fmt(visit.memo || "");
   if (memoInput) memoInput.value = currentMemo;
 
   const setEditMode = (on) => {
@@ -405,13 +486,12 @@ export async function renderVisitDetail(appEl, query) {
       }
       if (re.ctx) setUser(re.ctx);
 
-      const v2 = re.visit || re.result || null;
-      const freshMemo = fmt(v2 && v2.memo);
+      const v2 = unwrapOne(re);
+      const freshMemo = fmt(v2 && v2.memo).trim();
 
-      if (memoText) memoText.textContent = freshMemo.trim() ? freshMemo : "—";
-      // currentMemo の更新（キャンセル時の復元用）
-      // ※ const を変えないため、入力欄も更新して edit を閉じる
-      if (memoInput) memoInput.value = freshMemo;
+      if (memoText) memoText.textContent = freshMemo ? freshMemo : "—";
+      currentMemo = freshMemo;
+      if (memoInput) memoInput.value = currentMemo;
       setEditMode(false);
 
       toast({ title: "保存完了", message: "メモを更新しました。" });
