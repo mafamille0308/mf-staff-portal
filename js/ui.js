@@ -61,6 +61,43 @@ export function showModal({ title, bodyHtml, okText = "OK", cancelText = "キャ
   });
 }
 
+export function showSelectModal({ title, bodyHtml, okText = "変更", cancelText = "キャンセル", selectId }) {
+  const host = document.querySelector("#modalHost");
+  if (!host) return Promise.resolve(null);
+
+  host.classList.remove("is-hidden");
+  host.setAttribute("aria-hidden", "false");
+
+  host.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="m-title">${escapeHtml(title || "")}</div>
+      <div class="m-body">${bodyHtml || ""}</div>
+      <div class="m-actions">
+        <button class="btn btn-ghost" id="mCancel" type="button">${escapeHtml(cancelText)}</button>
+        <button class="btn" id="mOk" type="button">${escapeHtml(okText)}</button>
+      </div>
+    </div>
+  `;
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      host.classList.add("is-hidden");
+      host.setAttribute("aria-hidden", "true");
+      host.innerHTML = "";
+    };
+    host.querySelector("#mCancel")?.addEventListener("click", () => { cleanup(); resolve(null); });
+    host.querySelector("#mOk")?.addEventListener("click", () => {
+      const sel = host.querySelector(`#${selectId}`);
+      const v = sel ? String(sel.value || "") : "";
+      cleanup();
+      resolve(v);
+    });
+    host.addEventListener("click", (e) => {
+      if (e.target === host) { cleanup(); resolve(null); }
+    }, { once: true });
+  });
+}
+
 export function escapeHtml(s) {
   return String(s ?? "")
     .replaceAll("&", "&amp;")

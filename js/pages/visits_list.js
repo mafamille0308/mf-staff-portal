@@ -1,8 +1,95 @@
 // js/pages/visits_list.js
-import { render, toast, escapeHtml, showModal, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
+import { render, toast, escapeHtml, showModal, showSelectModal, fmt, displayOrDash, fmtDateTimeJst } from "../ui.js";
 import { callGas, unwrapResults } from "../api.js";
 import { getIdToken } from "../auth.js";
-import { toggleVisitDone } from "./visit_done_toggle.js";
+import { updateVisitDone } from "./visit_done_toggle.js";
+
+const BILLING_STATUS_LABELS_FALLBACK = {
+  unbilled:   "未請求",
+  invoicing: "請求中",
+  paid:      "支払済",
+  cancelled: "キャンセル",
+  refunded:  "返金済",
+  failed:    "支払失敗",
+  voided:    "請求取消",
+};
+
+let _billingStatusLabelMapCache = null; // { [key]: label }
+let _billingStatusOrderCache = null;    // string[]（GAS results の順序）
+
+function billingStatusLabel_(key) {
+  const k0 = String(key || "").trim();
+  // 仕様：初期値は unbilled。空や欠損はUI上 unbilled 扱い（DB更新はしない）
+  const k = k0 ? k0 : "unbilled";
+  if (_billingStatusLabelMapCache && _billingStatusLabelMapCache[k]) return _billingStatusLabelMapCache[k];
+  return BILLING_STATUS_LABELS_FALLBACK[k] || k;
+}
+
+async function ensureBillingStatusLabelMap_(idToken) {
+  if (_billingStatusLabelMapCache && Array.isArray(_billingStatusOrderCache)) {
+    return { map: _billingStatusLabelMapCache, order: _billingStatusOrderCache };
+  }
+  try {
+    const resp = await callGas({ action: "getBillingStatusOptions" }, idToken);
+    const u = unwrapResults(resp);
+    const results = (u && Array.isArray(u.results)) ? u.results : [];
+    const map = {};
+    const order = [];
+
+    for (const x of results) {
+      const kk = String(x?.key || x?.status || x?.value || "").trim();
+      const ll = String(x?.label || x?.name || "").trim();
+      if (!kk || !ll) continue;
+      map[kk] = ll;
+      order.push(kk);
+    }
+    // 安全策：unbilled は必ず存在させる（最悪フォールバック）
+    if (!map.unbilled) map.unbilled = BILLING_STATUS_LABELS_FALLBACK.unbilled || "未請求";
+    if (!order.includes("unbilled")) order.unshift("unbilled");
+
+    _billingStatusLabelMapCache = Object.keys(map).length ? map : { ...BILLING_STATUS_LABELS_FALLBACK };
+    _billingStatusOrderCache = order;
+  } catch (_) {
+    _billingStatusLabelMapCache = { ...BILLING_STATUS_LABELS_FALLBACK };
+    _billingStatusOrderCache = Object.keys(_billingStatusLabelMapCache);
+  }
+  return { map: _billingStatusLabelMapCache, order: _billingStatusOrderCache };
+}
+
+const VISIT_TYPE_LABELS_FALLBACK = {
+  sitting: "シッティング",
+  training: "トレーニング",
+  meeting_free: "打ち合わせ（無料）",
+  meeting_paid: "打ち合わせ（有料）",
+};
+
+let _visitTypeLabelMapCache = null; // { [key]: label }
+
+function visitTypeLabel_(key) {
+  const k = String(key || "").trim();
+  if (!k) return "訪問種別未設定";
+  if (_visitTypeLabelMapCache && _visitTypeLabelMapCache[k]) return _visitTypeLabelMapCache[k];
+  return VISIT_TYPE_LABELS_FALLBACK[k] || k;
+}
+
+async function ensureVisitTypeLabelMap_(idToken) {
+  if (_visitTypeLabelMapCache) return _visitTypeLabelMapCache;
+  try {
+    const resp = await callGas({ action: "getVisitTypeOptions" }, idToken);
+    const u = unwrapResults(resp);
+    const results = (u && Array.isArray(u.results)) ? u.results : [];
+    const map = {};
+    for (const x of results) {
+      const kk = String(x?.key || x?.type || x?.value || "").trim();
+      const ll = String(x?.label || x?.name || "").trim();
+      if (kk) map[kk] = ll || kk;
+    }
+    _visitTypeLabelMapCache = Object.keys(map).length ? map : { ...VISIT_TYPE_LABELS_FALLBACK };
+  } catch (_) {
+    _visitTypeLabelMapCache = { ...VISIT_TYPE_LABELS_FALLBACK };
+  }
+  return _visitTypeLabelMapCache;
+}
 
 // ===== sessionStorage keys =====
 const KEY_VF_STATE = "mf:visits_list:state:v1";
@@ -11,6 +98,7 @@ const CACHE_TTL_MS = 2 * 60 * 1000; // 2分（体感改善目的）
 
 const KEY_VLIST_SCROLL_Y = "mf:visits_list:scroll_y:v1";
 const KEY_VLIST_SCROLL_RESTORE_ONCE = "mf:visits_list:scroll_restore_once:v1";
+const KEY_VLIST_DIRTY = "mf:visits_list:dirty:v1";
 
 function toYmd(d) {
   const yyyy = d.getFullYear();
@@ -68,6 +156,21 @@ function loadCache_(key) {
 
 function saveCache_(key, visits) {
   try { sessionStorage.setItem(KEY_VF_CACHE, JSON.stringify({ key, ts: Date.now(), visits })); } catch (_) {}
+}
+
+function invalidateCache_() {
+  try { sessionStorage.removeItem(KEY_VF_CACHE); } catch (_) {}
+}
+
+function consumeDirty_() {
+  try {
+    const v = sessionStorage.getItem(KEY_VLIST_DIRTY);
+    if (v === "1") {
+      sessionStorage.removeItem(KEY_VLIST_DIRTY);
+      return true;
+    }
+  } catch (_) {}
+  return false;
 }
 
 function pickVisitType_(v) {
@@ -150,6 +253,15 @@ function mergeVisitById(list, visitId, patch) {
   return { list: next, idx, merged };
 }
 
+function applyVisitTypeBadges_(rootEl) {
+  const root = rootEl || document;
+  const nodes = root.querySelectorAll('[data-role="visit-type-badge"]');
+  nodes.forEach((el) => {
+    const key = el?.dataset?.visitType || "";
+    el.textContent = visitTypeLabel_(key);
+  });
+}
+
 function cardHtml(v) {
   // v のスキーマはGAS返却に合わせる（不足項目は安全にフォールバック）
   const startRaw = v.start || v.start_iso || v.start_at || v.start_time || "";
@@ -159,11 +271,17 @@ function cardHtml(v) {
   const vid = v.visit_id || v.id || "";
   const done = isDone_(v);
   const visitType = v.visit_type || v.type || ""; // 互換（正式は visit_type）
-  const billingStatus = v.billing_status || v.request_status || ""; // 移行期間互換
+  const billingStatusRaw = v.billing_status || v.request_status || ""; // 移行期間互換
+  const billingStatus = String(billingStatusRaw || "").trim() || "unbilled";
   const isActive = !(v.is_active === false || String(v.is_active || "").toLowerCase() === "false");
 
   return `
-    <div class="card" data-visit-id="${escapeHtml(vid)}" data-done="${done ? "1" : "0"}">
+    <div class="card"
+      data-visit-id="${escapeHtml(vid)}"
+      data-done="${done ? "1" : "0"}"
+      data-billing-status="${escapeHtml(String(billingStatus))}"
+      data-is-active="${isActive ? "1" : "0"}"
+    >
       <div class="card-title">
         <div>${escapeHtml(displayOrDash(start))}</div>
         <div>${escapeHtml(displayOrDash(vid))}</div>
@@ -173,19 +291,32 @@ function cardHtml(v) {
         <div>${escapeHtml(displayOrDash(title))}</div>
       </div>
       <div class="badges" data-role="badges">
-        <span class="badge badge-visit-type">
-          ${escapeHtml(displayOrDash(fmt(visitType), "訪問種別未設定"))}
+        <span class="badge badge-visit-type"
+          data-role="visit-type-badge"
+          data-visit-type="${escapeHtml(String(visitType || ""))}">
+          ${escapeHtml(visitTypeLabel_(visitType))}
         </span>
-        <span class="badge badge-billing-status">
-          ${escapeHtml(displayOrDash(fmt(billingStatus), "請求未確定"))}
+        <span class="badge badge-billing-status"
+          data-action="change-billing-status"
+          style="cursor:pointer;"
+          title="タップで請求ステータスを変更"
+        >
+          ${escapeHtml(displayOrDash(fmt(billingStatusLabel_(billingStatus)), "未請求"))}
         </span>
-          <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}"
-            data-action="toggle-done"
-            style="cursor:pointer;"
-            title="タップで完了/未完了を切り替え"
-          >${done ? "完了" : "未完了"}
+        <span class="badge badge-done ${done ? "badge-ok is-done" : "is-not-done"}"
+          data-action="toggle-done"
+          style="cursor:pointer;"
+          title="タップで完了/未完了を切り替え"
+        >
+           ${done ? "完了" : "未完了"}
         </span>
-        <span class="badge badge-active ${isActive ? "is-active" : "badge-danger is-inactive"}">${isActive ? "有効" : "削除済"}</span>
+        <span class="badge badge-active ${isActive ? "is-active" : "badge-danger is-inactive"}"
+          data-action="toggle-active"
+          style="cursor:pointer;"
+          title="タップで有効/削除済を切り替え"
+        >
+          ${isActive ? "有効" : "削除済"}
+        </span>
       </div>
       <div class="row" style="justify-content:flex-end; margin-top:10px;">
         <button class="btn btn-ghost" type="button" data-action="open">詳細</button>
@@ -356,11 +487,14 @@ export async function renderVisitsList(appEl, query) {
       state.done_filter === "done_only" ? "完了のみ" :
       state.done_filter === "all" ? "すべて" :
       "未完了優先";
-    const typeLabel = (state.type_filter && state.type_filter !== "all") ? state.type_filter : "すべて";    
+    const typeLabel =
+      (state.type_filter && state.type_filter !== "all")
+        ? visitTypeLabel_(state.type_filter)
+        : "すべて";
     const activeLabel = (state.active_filter === "include_deleted") ? "含める" : "除外";
     badgesEl.innerHTML = [
       `<span class="badge">期間: ${escapeHtml(state.date_from)} → ${escapeHtml(state.date_to_ymd)}</span>`,
-      `<span class="badge">完了: ${escapeHtml(doneLabel)}</span>`,
+      `<span class="badge">完了状態: ${escapeHtml(doneLabel)}</span>`,
       `<span class="badge">種別: ${escapeHtml(typeLabel)}</span>`,
       `<span class="badge">削除済み: ${escapeHtml(activeLabel)}</span>`,
       `<span class="badge">並び: ${escapeHtml(state.sort_order === "desc" ? "新しい順" : "近い順")}</span>`,
@@ -378,7 +512,7 @@ export async function renderVisitsList(appEl, query) {
     const current = String(state.type_filter || "all");
     typeEl.innerHTML = [
       `<option value="all">すべて</option>`,
-      ...types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`)
+      ...types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(visitTypeLabel_(t))}</option>`)
     ].join("");
     // 既存選択が無効なら all に戻す
     const exists = (current === "all") || types.includes(current);
@@ -422,11 +556,19 @@ export async function renderVisitsList(appEl, query) {
     const y = window.scrollY;
     listEl.innerHTML = sorted.map(cardHtml).join("");
     window.scrollTo(0, y);
+    applyVisitTypeBadges_(listEl);
     updateStatusBadges_(sorted.length, base.length);
   };
 
   const fetchAndRender_ = async ({ force = false } = {}) => {
     listEl.innerHTML = `<p class="p">読み込み中...</p>`;
+
+    // ===== 詳細ページ等で更新が起きたら一覧キャッシュを捨てる =====
+    // - dirty が立っていれば、キャッシュを破棄して必ずサーバ再取得する
+    if (consumeDirty_()) {
+      invalidateCache_();
+      force = true;
+    }
 
     const idToken = getIdToken();
     if (!idToken) {
@@ -434,12 +576,22 @@ export async function renderVisitsList(appEl, query) {
       return;
     }
 
+    // 訪問種別ラベル（失敗してもフォールバック）
+    ensureVisitTypeLabelMap_(idToken)
+      .then(() => { applyVisitTypeBadges_(appEl); rebuildTypeOptions_(); updateStatusBadges_(0, 0); })
+      .catch(() => {});
+
+    // 請求ステータス候補（失敗してもフォールバック）
+    ensureBillingStatusLabelMap_(idToken).catch(() => {});
+
     // ===== cache（同一期間なら短時間は再取得しない）=====
     const ck = cacheKey_(state);
     if (!force) {
       const cached = loadCache_(ck);
       if (cached) {
         visitsAll = cached;
+        // ラベル読み込み済みなら表示・フィルタをラベルで整える
+        applyVisitTypeBadges_(appEl);
         rebuildTypeOptions_();
         applyAndRender_();
         return;
@@ -478,6 +630,12 @@ export async function renderVisitsList(appEl, query) {
 
     visitsAll = visits;
     saveCache_(cacheKey_(state), visitsAll);
+
+    // ラベル取得後に種別フィルタの表示文字列も更新したいので、ここで待つ（失敗しても進む）
+    try {
+      await ensureVisitTypeLabelMap_(idToken);
+    } catch (_) {}
+
     rebuildTypeOptions_();
     applyAndRender_();
   };
@@ -600,56 +758,262 @@ export async function renderVisitsList(appEl, query) {
       return;
     }
 
+    if (action === "toggle-active") {
+      if (actEl.dataset.busy === "1") return;
+
+      const currentActive = (card?.dataset?.isActive === "1");
+      const nextActive = !currentActive;
+
+      const ok = await showModal({
+        title: "確認",
+        bodyHtml: `<p class="p">この予約を「${escapeHtml(nextActive ? "有効" : "削除済")}」に変更します。よろしいですか？</p>`,
+        okText: "変更",
+        cancelText: "キャンセル",
+      });
+      if (!ok) return;
+
+      actEl.dataset.busy = "1";
+      const prevText = actEl.textContent;
+      const prevIsActive = (card?.dataset?.isActive === "1");
+      const prevClasses = {
+        isActive: actEl.classList.contains("is-active"),
+        badgeDanger: actEl.classList.contains("badge-danger"),
+        isInactive: actEl.classList.contains("is-inactive"),
+      };
+
+      // ===== Optimistic UI（即時反映）=====
+      if (card) card.dataset.isActive = nextActive ? "1" : "0";
+      actEl.textContent = (nextActive ? "有効" : "削除済");
+      actEl.classList.toggle("is-active", nextActive);
+      actEl.classList.toggle("badge-danger", !nextActive);
+      actEl.classList.toggle("is-inactive", !nextActive);
+
+      try {
+        const idToken2 = getIdToken();
+        if (!idToken2) {
+          toast({ title: "未ログイン", message: "再ログインしてください。" });
+          actEl.textContent = prevText;
+          if (card) card.dataset.isActive = prevIsActive ? "1" : "0";
+          actEl.textContent = prevText;
+          actEl.classList.toggle("is-active", prevClasses.isActive);
+          actEl.classList.toggle("badge-danger", prevClasses.badgeDanger);
+          actEl.classList.toggle("is-inactive", prevClasses.isInactive);
+          return;
+        }
+
+        const up = await callGas({
+          action: "updateVisit",
+          origin: "portal",
+          source: "portal",
+          visit_id: vid,
+          fields: { is_active: nextActive },
+        }, idToken2);
+
+        const u = unwrapResults(up);
+        if (u && u.success === false) throw new Error(u.error || u.message || "更新に失敗しました。");
+
+        const patch = { visit_id: vid, is_active: nextActive };
+        const m = mergeVisitById(visitsAll, vid, patch);
+        visitsAll = m.list;
+        if (m.idx < 0) { await fetchAndRender_({ force: true }); return; }
+
+        saveCache_(cacheKey_(state), visitsAll);
+        applyAndRender_();
+        toast({ title: "更新完了", message: "有効ステータスを更新しました。" });
+      } catch (err) {
+        toast({ title: "更新失敗", message: err?.message || String(err || "") });
+        if (card) card.dataset.isActive = prevIsActive ? "1" : "0";
+        actEl.textContent = prevText;
+        actEl.classList.toggle("is-active", prevClasses.isActive);
+        actEl.classList.toggle("badge-danger", prevClasses.badgeDanger);
+        actEl.classList.toggle("is-inactive", prevClasses.isInactive);
+
+        // state rollback（並び/フィルタの整合性のため）
+        try {
+          const m2 = mergeVisitById(visitsAll, vid, { visit_id: vid, is_active: prevIsActive });
+          visitsAll = m2.list;
+          saveCache_(cacheKey_(state), visitsAll);
+          applyAndRender_();
+        } catch (_) {}
+      } finally {
+        actEl.dataset.busy = "0";
+      }
+      return;
+    }
+
+    if (action === "change-billing-status") {
+      if (actEl.dataset.busy === "1") return;
+
+      const idToken2 = getIdToken();
+      if (!idToken2) {
+        toast({ title: "未ログイン", message: "再ログインしてください。" });
+        return;
+      }
+
+      // 候補（GAS優先、失敗時fallback）
+      let opt = null;
+      try { opt = await ensureBillingStatusLabelMap_(idToken2); } catch (_) { opt = null; }
+      const map = (opt && opt.map && typeof opt.map === "object") ? opt.map : { ...BILLING_STATUS_LABELS_FALLBACK };
+      const ordered = (opt && Array.isArray(opt.order) && opt.order.length) ? opt.order : Object.keys(map);
+
+      const currentKey = String(card?.dataset?.billingStatus || "").trim() || "unbilled";
+      const selectId = "mBillingStatusSelect";
+
+      const optionsHtml = ordered.map(k => {
+        const label = String(map[k] || billingStatusLabel_(k));
+        const sel = (String(k) === String(currentKey)) ? " selected" : "";
+        return `<option value="${escapeHtml(String(k))}"${sel}>${escapeHtml(label)}（${escapeHtml(String(k))}）</option>`;
+      }).join("");
+
+      const bodyHtml = `
+        <div class="p" style="margin-bottom:8px;">請求ステータスを選択してください。</div>
+        <select id="${escapeHtml(selectId)}" class="select" style="width:100%;">
+          ${optionsHtml}
+        </select>
+        <div class="p" style="margin-top:8px; opacity:0.8;">
+          現在：<strong>${escapeHtml(billingStatusLabel_(currentKey))}</strong>
+        </div>
+      `;
+
+      const picked = await showSelectModal({
+        title: "請求ステータス変更",
+        bodyHtml,
+        okText: "変更",
+        cancelText: "キャンセル",
+        selectId,
+      });
+      if (picked == null) return; // cancel
+
+      const nextKey = String(picked || "").trim() || "unbilled";
+      if (nextKey === currentKey) return; // 変更なし
+
+      actEl.dataset.busy = "1";
+      const prevText = actEl.textContent;
+      const prevKey = currentKey;
+
+      // ===== Optimistic UI（即時反映）=====
+      if (card) card.dataset.billingStatus = nextKey;
+      actEl.textContent = billingStatusLabel_(nextKey);
+
+      try {
+        const up = await callGas({
+          action: "updateVisit",
+          origin: "portal",
+          source: "portal",
+          visit_id: vid,
+          fields: { billing_status: nextKey },
+        }, idToken2);
+
+        const u = unwrapResults(up);
+        if (u && u.success === false) throw new Error(u.error || u.message || "更新に失敗しました。");
+
+        const patch = { visit_id: vid, billing_status: nextKey };
+        const m = mergeVisitById(visitsAll, vid, patch);
+        visitsAll = m.list;
+        if (m.idx < 0) { await fetchAndRender_({ force: true }); return; }
+
+        saveCache_(cacheKey_(state), visitsAll);
+        applyAndRender_();
+        toast({ title: "更新完了", message: "請求ステータスを更新しました。" });
+      } catch (err) {
+        toast({ title: "更新失敗", message: err?.message || String(err || "") });
+        if (card) card.dataset.billingStatus = prevKey;
+        actEl.textContent = prevText;
+
+        // state rollback
+        try {
+          const m2 = mergeVisitById(visitsAll, vid, { visit_id: vid, billing_status: prevKey });
+          visitsAll = m2.list;
+          saveCache_(cacheKey_(state), visitsAll);
+          applyAndRender_();
+        } catch (_) {}
+      } finally {
+        actEl.dataset.busy = "0";
+      }
+      return;
+    }
+
     if (action === "toggle-done") {
       // 二重送信防止（spanでも動くよう dataset で統一）
       if (actEl.dataset.busy === "1") return;
 
       const currentDone = card?.dataset?.done === "1";
+      const nextDone = !currentDone;
+
+      // ===== 確認（キャンセル時は何もしない）=====
+      const ok = await showModal({
+        title: "確認",
+        bodyHtml: `<p class="p">予約 <strong>${escapeHtml(vid)}</strong> を「${nextDone ? "完了" : "未完了"}」に変更します。よろしいですか？</p>`,
+        okText: nextDone ? "完了にする" : "未完了に戻す",
+        cancelText: "キャンセル",
+        danger: false,
+      });
+      if (!ok) return;
+
       actEl.dataset.busy = "1";
-      const prevText = actEl.textContent;
-      actEl.textContent = "更新中...";
+      const prevDone = !!currentDone;
+      const prevIsDoneText = actEl.textContent;
+      const prevClasses = {
+        badgeOk: actEl.classList.contains("badge-ok"),
+        isDone: actEl.classList.contains("is-done"),
+        isNotDone: actEl.classList.contains("is-not-done"),
+      };
 
       try {
-        const r = await toggleVisitDone({ visitId: vid, currentDone });
-        if (!r.ok) {
-          // キャンセル時は表示を戻すだけ
-          actEl.textContent = prevText;
-          return;
-        }
-
-        // ===== その場のUIを確実に復帰（再描画が走らない/遅れるケースの保険）=====
-        const nextDone = !!r.nextDone;
-        // card の状態も更新（次回タップ時の currentDone 判定に使う）
+        // ===== Optimistic UI（即時反映）=====
         if (card) card.dataset.done = nextDone ? "1" : "0";
-        // バッジ表示を更新中→完了/未完了へ戻す
         actEl.textContent = nextDone ? "完了" : "未完了";
         actEl.classList.toggle("badge-ok", nextDone);
         actEl.classList.toggle("is-done", nextDone);
         actEl.classList.toggle("is-not-done", !nextDone);
 
-        // ===== マージ方式で state を更新し、カードを cardHtml で再描画 =====
+        // ===== state も即時更新（並び替えに効かせる）=====
+        const optimisticPatch = { visit_id: vid, is_done: nextDone, done: nextDone };
+        const m0 = mergeVisitById(visitsAll, vid, optimisticPatch);
+        visitsAll = m0.list;
+        if (m0.idx < 0) { await fetchAndRender_({ force: true }); return; }
+        saveCache_(cacheKey_(state), visitsAll);
+        applyAndRender_();
+
+        // ===== サーバ更新（失敗したら rollback）=====
+        const r = await updateVisitDone({ visitId: vid, nextDone });
+        if (!r.ok) throw new Error(r.error || "更新に失敗しました。");
+
+        // returned 差分があれば上書き（安全に吸収）
         const patch = {
           ...(r.returned && typeof r.returned === "object" ? r.returned : {}),
           visit_id: vid,
           is_done: nextDone,
           done: nextDone,
         };
-
         const m = mergeVisitById(visitsAll, vid, patch);
         visitsAll = m.list;
-
-        // 重要：マージに失敗した場合は内部stateが更新できず、未完了優先ソートが崩れるため再取得
-        if (m.idx < 0) {
-          await fetchAndRender_({ force: true });
-          return;
-        }
-
-        // cache も更新（戻る/再表示で古い done 状態を見せない）
+        if (m.idx < 0) { await fetchAndRender_({ force: true }); return; }
         saveCache_(cacheKey_(state), visitsAll);
-
-        // 並び替え・フィルタ条件を反映（未完了優先の入れ替えはここで発生する）
         applyAndRender_();
-        // applyAndRender_ がDOMを差し替えるので、このactElへ戻し処理は不要
+        toast({ title: "更新完了", message: `「${nextDone ? "完了" : "未完了"}」に更新しました。` });
+      } catch (err) {
+        // ===== rollback（DOM + state + cache）=====
+        try {
+          if (card) card.dataset.done = prevDone ? "1" : "0";
+          actEl.textContent = prevIsDoneText;
+          actEl.classList.toggle("badge-ok", prevClasses.badgeOk);
+          actEl.classList.toggle("is-done", prevClasses.isDone);
+          actEl.classList.toggle("is-not-done", prevClasses.isNotDone);
+        } catch (_) {}
+
+        try {
+          const rollbackPatch = { visit_id: vid, is_done: prevDone, done: prevDone };
+          const mr = mergeVisitById(visitsAll, vid, rollbackPatch);
+          visitsAll = mr.list;
+          saveCache_(cacheKey_(state), visitsAll);
+          applyAndRender_();
+        } catch (_) {}
+
+        toast({
+          title: "更新失敗",
+          message: (err && err.message) ? err.message : String(err || ""),
+        });
       } finally {
         actEl.dataset.busy = "0";
       }
