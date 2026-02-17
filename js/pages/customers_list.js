@@ -94,6 +94,22 @@ function filter_(list, q) {
   });
 }
 
+function sortByKana_(list) {
+  const toKey = (c) => {
+    const sk = normKana_(c.surname_kana || "");
+    const gk = normKana_(c.given_kana || "");
+    const nk = normKana_(c.name_kana || "");
+    if (sk || gk) return sk + gk;
+    if (nk) return nk;
+    return normKana_(c.name || "");
+  };
+
+  return [...list].sort((a, b) =>
+    toKey(a).localeCompare(toKey(b), "ja")
+  );
+}
+
+
 function renderPetsBadges_(petNames) {
   const pets = Array.isArray(petNames) ? petNames : [];
   if (!pets.length) return `<div class="p text-sm">ペット：—</div>`;
@@ -107,7 +123,6 @@ function cardHtml(c) {
       <div class="card-title">
         <div>
           ${escapeHtml(fmt(c.name || "（名称未設定）"))}
-          <span class="badge">${escapeHtml(cid)}</span>
         </div>
       </div>
       <div class="card-sub">
@@ -175,29 +190,24 @@ export async function renderCustomersList(appEl, query) {
     <section class="section">
       <div class="row row-between">
         <h1 class="h1">担当顧客一覧</h1>
-        <button class="btn btn-ghost" type="button" data-action="list">担当顧客一覧</button>
       </div>
 
       <div class="row" style="margin-top:10px;">
         <input id="cfKeyword" class="input" type="text" inputmode="search"
-          placeholder="検索（顧客名/住所/電話/ペット/ID）" />
+          placeholder="検索（顧客名/住所/電話/ペット名）" />
           <button class="btn" type="button" data-action="search">検索</button>
         <button class="btn btn-ghost" type="button" data-action="clear-keyword">クリア</button>
       </div>
 
       <div class="hr"></div>
       <div id="customersList">
-        <p class="p" style="opacity:.85;">
-          顧客名を検索してください（ひらがな可）。<br>
-          一覧が必要な場合は「担当顧客一覧」を押してください。
-        </p>
+        <p class="p">読み込み中...</p>
       </div>
     </section>
   `);
 
   const listEl = appEl.querySelector("#customersList");
   const kwEl = appEl.querySelector("#cfKeyword");
-  const listBtn = appEl.querySelector('[data-action="list"]');
   const searchBtn = appEl.querySelector('[data-action="search"]');
 
   if (!listEl) return;
@@ -206,6 +216,7 @@ export async function renderCustomersList(appEl, query) {
   let customersAll = [];
   let _fetched = false;      // 一度でも listMyCustomers を叩いたか
   let _hasSearched = false;  // 検索操作をしたか（空画面回避/文言制御）
+  let _petReqSeq = 0;
 
   // ===== スクロール復元（詳細→一覧の体感改善）=====
   const restoreScrollOnce_ = () => {
@@ -227,17 +238,6 @@ export async function renderCustomersList(appEl, query) {
   };
 
   const applyAndRender_ = () => {
-    // 未検索・未一覧の初期状態はガイドを維持
-    if (!_fetched && !_hasSearched) {
-      listEl.innerHTML = `
-        <p class="p" style="opacity:.85;">
-          まずは検索してください（かな：ひらがな入力でもヒットします）。<br>
-          一覧が必要な場合は「担当顧客一覧」を押してください。
-        </p>
-      `;
-      return;
-    }
-
     const filtered = filter_(customersAll, state.keyword);
 
     if (!filtered.length) {
@@ -249,7 +249,48 @@ export async function renderCustomersList(appEl, query) {
     const y = window.scrollY;
     listEl.innerHTML = filtered.map(cardHtml).join("");
     window.scrollTo(0, y);
+
+    // ペット名バッジは後追いで埋める（UX維持＆Pets全走査を別軸化）
+    fetchAndApplyPetNames_(filtered).catch(() => {});
   };
+
+  async function fetchAndApplyPetNames_(filtered) {
+    if (!Array.isArray(filtered) || filtered.length === 0) return;
+    if (!_fetched) return; // 一覧データ未取得の初期ガイド状態では呼ばない
+
+    const mySeq = ++_petReqSeq;
+    const ids = filtered.map(x => String(x.customer_id || '').trim()).filter(Boolean);
+    if (ids.length === 0) return;
+
+    const idToken = getIdToken();
+    if (!idToken) return;
+
+    const res = await callGas({ action: "getPetNamesByCustomerIds", customer_ids: ids }, idToken);
+    if (mySeq !== _petReqSeq) return; // 古いレスポンスは捨てる
+    if (!res || res.success === false) return;
+
+    const data = unwrapResults(res);
+    const map = (data && data.results && typeof data.results === "object") ? data.results : {};
+
+    // customersAll 側も更新（検索で pet_names を使えるようにする）
+    for (let i = 0; i < customersAll.length; i++) {
+      const cid = String(customersAll[i].customer_id || "").trim();
+      if (!cid) continue;
+      const names = Array.isArray(map[cid]) ? map[cid] : null;
+      if (names) customersAll[i].pet_names = names;
+    }
+
+    // DOM部分更新（カード全再描画はしない）
+    for (let i = 0; i < ids.length; i++) {
+      const cid = ids[i];
+      const card = listEl.querySelector(`.card[data-customer-id="${CSS.escape(cid)}"]`);
+      if (!card) continue;
+      const wrap = card.querySelector(".pets-badges");
+      if (!wrap) continue;
+      const names = Array.isArray(map[cid]) ? map[cid] : [];
+      wrap.innerHTML = renderPetsBadges_(names);
+    }
+  }
 
   const fetchAndRender_ = async ({ force = false } = {}) => {
     listEl.innerHTML = `<p class="p">読み込み中...</p>`;
@@ -267,9 +308,8 @@ export async function renderCustomersList(appEl, query) {
     }
 
     try {
-      if (listBtn) listBtn.disabled = true;
       if (searchBtn) searchBtn.disabled = true;
-      customersAll = await fetchCustomers_(state, query);
+      customersAll = sortByKana_(await fetchCustomers_(state, query));
       saveCache_(ck, customersAll);
       _fetched = true;
       applyAndRender_();
@@ -277,7 +317,6 @@ export async function renderCustomersList(appEl, query) {
       toast({ title: "取得失敗", message: e?.message || String(e) });
       listEl.innerHTML = `<p class="p">取得に失敗しました。</p>`;
     } finally {
-      if (listBtn) listBtn.disabled = false;
       if (searchBtn) searchBtn.disabled = false;
     }
   };
@@ -287,8 +326,8 @@ export async function renderCustomersList(appEl, query) {
     setTimeout(() => restoreScrollOnce_(), 0);
   }
 
-  // 初期表示では一覧取得しない
-  // await fetchAndRender_({ force: false });
+  // 初期表示で全件取得して表示（staff:担当のみ / admin:全件 or staff_id指定時のみ）
+  await fetchAndRender_({ force: false });
 
   // Enter で検索実行（スマホUX）
   kwEl?.addEventListener("keydown", async (e) => {
@@ -313,13 +352,6 @@ export async function renderCustomersList(appEl, query) {
       state.keyword = "";
       saveState_(state);
       applyAndRender_();
-      return;
-    }
-
-    if (a === "list") {
-      // 一覧取得: 担当関係のある顧客を全件取得して表示
-      _hasSearched = false; // 一覧ボタンでの表示として扱う（文言制御のみ）
-      await fetchAndRender_({ force: true });
       return;
     }
 
