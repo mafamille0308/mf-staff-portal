@@ -87,11 +87,11 @@ function toBool(v) {
 }
 
 function isDone_(v) {
-  return toBool(v.done) || toBool(v.is_done);
+  return toBool(v?.is_done);
 }
 
 function isActive_(v) {
-  return !(v.is_active === false || String(v.is_active || "").toLowerCase() === "false");
+  return v?.is_active !== false;
 }
 
 function safeParseJson_(s) {
@@ -140,7 +140,7 @@ function consumeDirty_() {
 }
 
 function pickVisitType_(v) {
-  return String(v.visit_type || v.type || "").trim();
+  return String(v?.visit_type || "").trim();
 }
 
 function collectVisitTypes_(list) {
@@ -153,7 +153,7 @@ function collectVisitTypes_(list) {
 }
 
 function pickStartIso_(v) {
-  return v.start || v.start_iso || v.start_at || v.start_time || "";
+  return v?.start_time || "";
 }
 
 function epochMsSafe_(isoOrAny) {
@@ -171,17 +171,10 @@ function keywordHit_(v, kw) {
   if (!kw) return true;
   const hay = [
     v.visit_id,
-    v.id,
     v.customer_name,
-    v.customer,
-    v.account_name,
-    v.name,
     v.title,
-    v.course_name,
-    v.course,
-    v.summary,
     v.memo,
-    v.notes,
+    v.staff_name,
   ].map(x => normalizeKeyword_(x)).join("\n");
   return hay.includes(kw);
 }
@@ -210,7 +203,7 @@ function sortVisits_(list, sortOrder, mode) {
 
 function mergeVisitById(list, visitId, patch) {
   const id = String(visitId || "");
-  const idx = list.findIndex(v => String(v.visit_id || v.id || "") === id);
+  const idx = list.findIndex(v => String(v.visit_id || "") === id);
   if (idx < 0) return { list, idx: -1, merged: null };
   const prev = list[idx] || {};
   const merged = { ...prev, ...patch };
@@ -228,18 +221,27 @@ function applyVisitTypeBadges_(rootEl) {
   });
 }
 
+// ===== bulk edit helpers =====
+function pickBillingStatus_(v) {
+  return String(v?.billing_status || "").trim() || "unbilled";
+}
+
+function pickIsActive_(v) {
+  return isActive_(v);
+}
+
 function cardHtml(v) {
   // v のスキーマはGAS返却に合わせる（不足項目は安全にフォールバック）
-  const startRaw = v.start || v.start_iso || v.start_at || v.start_time || "";
+  const startRaw = v.start_time || "";
   const start = fmtDateTimeJst(startRaw);
-  const title = v.title || v.course_name || v.course || v.summary || "(無題)";
-  const customer = v.customer_name || v.customer || v.account_name || v.name || "";
-  const vid = v.visit_id || v.id || "";
+  const title = v.title || "(無題)";
+  const customer = v.customer_name || "";
+  const vid = v.visit_id || "";
   const done = isDone_(v);
-  const visitType = v.visit_type || v.type || ""; // 互換（正式は visit_type）
-  const billingStatusRaw = v.billing_status || v.request_status || ""; // 移行期間互換
-  const billingStatus = String(billingStatusRaw || "").trim() || "unbilled";
+  const visitType = v.visit_type || "";
+  const billingStatus = String(v.billing_status || "").trim() || "unbilled";
   const isActive = !(v.is_active === false || String(v.is_active || "").toLowerCase() === "false");
+  const vid2 = String(vid || "").trim();
 
   return `
     <div class="card"
@@ -248,6 +250,16 @@ function cardHtml(v) {
       data-billing-status="${escapeHtml(String(billingStatus))}"
       data-is-active="${isActive ? "1" : "0"}"
     >
+      <div class="card-bulk-check"
+        data-role="bulk-check-wrap"
+        style="display:none;
+        margin-bottom:8px;"
+      >
+        <label class="row" style="gap:8px; align-items:center;">
+          <input type="checkbox" data-role="bulk-check" data-visit-id="${escapeHtml(vid2)}" />
+          <span class="p" style="margin:0;">選択</span>
+        </label>
+      </div>
       <div class="card-title">
         <div>${escapeHtml(displayOrDash(start))}</div>
         <div>${escapeHtml(displayOrDash(vid))}</div>
@@ -298,6 +310,11 @@ export async function renderVisitsList(appEl, query) {
   // ===== state =====
   const init = defaultRange();
   const saved = (() => { try { return loadState_(); } catch (_) { return null; } })();
+
+  // ===== bulk edit ui state (in-memory) =====
+  let bulkMode = false;               // ON/OFF（一覧内のみ）
+  let bulkSelected = new Set();       // Set<visit_id>
+
   let state = {
     date_from: (saved && saved.date_from) ? String(saved.date_from) : init.date_from,
     date_to_ymd: (saved && saved.date_to_ymd) ? String(saved.date_to_ymd) : init.date_to.slice(0, 10),
@@ -371,6 +388,9 @@ export async function renderVisitsList(appEl, query) {
         </div>
       </details>
       <div class="row" id="vfStatusBadges" style="margin-top: 10px;"></div>
+      <div class="row" id="bulkBar" style="margin-top: 10px; display:none; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button class="btn" type="button" data-action="bulk-toggle">一括編集: OFF</button>
+      </div>
       <div class="hr"></div>
       <div id="visitsList"></div>
     </section>
@@ -390,6 +410,7 @@ export async function renderVisitsList(appEl, query) {
   const activeEl = appEl.querySelector("#vfActiveFilter");
   const sortEl = appEl.querySelector("#vfSortOrder");
   const badgesEl = appEl.querySelector("#vfStatusBadges");
+  const bulkBarEl = appEl.querySelector("#bulkBar");
 
   if (fromEl) fromEl.value = state.date_from;
   if (toEl) toEl.value = state.date_to_ymd;
@@ -472,6 +493,301 @@ export async function renderVisitsList(appEl, query) {
     ].join(" ");
   };
 
+  // ===== bulk edit UI =====
+  const updateBulkBar_ = () => {
+    if (!bulkBarEl) return;
+    const count = bulkSelected.size;
+    bulkBarEl.style.display = "flex";
+    bulkBarEl.innerHTML = [
+      `<button class="btn" type="button" data-action="bulk-toggle">一括編集: ${bulkMode ? "ON" : "OFF"}</button>`,
+      `<span class="badge">選択: ${escapeHtml(String(count))}件</span>`,
+      `<button class="btn btn-ghost" type="button" data-action="bulk-clear" ${count ? "" : "disabled"}>全解除</button>`,
+      `<button class="btn" type="button" data-action="bulk-run" ${count ? "" : "disabled"}>一括変更</button>`,
+    ].join("");
+  };
+
+  const applyBulkModeToDom_ = () => {
+    if (!listEl) return;
+    const wraps = listEl.querySelectorAll('[data-role="bulk-check-wrap"]');
+    wraps.forEach(el => { el.style.display = bulkMode ? "block" : "none"; });
+    // 既存選択をチェックへ反映
+    const checks = listEl.querySelectorAll('input[data-role="bulk-check"]');
+    checks.forEach((ch) => {
+      const vid = String(ch?.dataset?.visitId || ch?.getAttribute("data-visit-id") || ch?.closest("[data-visit-id]")?.dataset?.visitId || "").trim();
+      // data-visit-id は input ではなく dataset に入るケースもあるので getAttribute も見る
+      const vid2 = String(ch.getAttribute("data-visit-id") || ch.dataset.visitId || "").trim();
+      const id = vid2 || vid;
+      ch.checked = id ? bulkSelected.has(id) : false;
+    });
+    updateBulkBar_();
+  };
+
+  const setBulkMode_ = (next) => {
+    bulkMode = !!next;
+    if (!bulkMode) {
+      // OFFにしたら選択もクリア（事故防止）
+      bulkSelected = new Set();
+    }
+    applyBulkModeToDom_();
+  };
+
+  const clearBulkSelection_ = () => {
+    bulkSelected = new Set();
+    applyBulkModeToDom_();
+  };
+
+  // bulk 実行（Optimistic + GAS bulkUpdateVisits）
+  const runBulkEdit_ = async () => {
+    const ids = Array.from(bulkSelected || []);
+    if (!ids.length) return;
+
+    const idToken2 = getIdToken();
+    if (!idToken2) {
+      toast({ title: "未ログイン", message: "再ログインしてください。" });
+      return;
+    }
+
+    // ===== 対象項目選択 =====
+    const itemSelectId = "mBulkItemSelect";
+    const itemBodyHtml = `
+      <div class="p" style="margin-bottom:8px;">一括変更する項目を選択してください。</div>
+      <select id="${escapeHtml(itemSelectId)}" class="select" style="width:100%;">
+        <option value="billing_status">請求ステータス</option>
+        <option value="done">完了状態</option>
+        <option value="is_active">有効/削除済</option>
+      </select>
+      <div class="p" style="margin-top:8px; opacity:0.8;">
+        対象：<strong>${escapeHtml(String(ids.length))}件</strong>
+      </div>
+    `;
+    const pickedItem = await showSelectModal({
+      title: "一括編集",
+      bodyHtml: itemBodyHtml,
+      okText: "次へ",
+      cancelText: "キャンセル",
+      selectId: itemSelectId,
+    });
+    if (pickedItem == null) return;
+    const item = String(pickedItem || "").trim();
+
+    // ===== 変更値選択 =====
+    let fields = null;
+    let confirmText = "";
+
+    if (item === "billing_status") {
+      let opt = null;
+      try { opt = await ensureBillingStatusLabelMap_(idToken2); } catch (_) { opt = null; }
+      const map = (opt && opt.map && typeof opt.map === "object") ? opt.map : { ...BILLING_STATUS_LABELS_FALLBACK };
+      const ordered = (opt && Array.isArray(opt.order) && opt.order.length) ? opt.order : Object.keys(map);
+
+      const selectId2 = "mBulkBillingSelect";
+      const optionsHtml = ordered.map(k => {
+        const label = String(map[k] || billingStatusLabel_(k));
+        return `<option value="${escapeHtml(String(k))}">${escapeHtml(label)}（${escapeHtml(String(k))}）</option>`;
+      }).join("");
+      const body2 = `
+        <div class="p" style="margin-bottom:8px;">請求ステータス（変更後）を選択してください。</div>
+        <select id="${escapeHtml(selectId2)}" class="select" style="width:100%;">${optionsHtml}</select>
+        <div class="p" style="margin-top:8px; opacity:0.8;">対象：<strong>${escapeHtml(String(ids.length))}件</strong></div>
+      `;
+      const picked2 = await showSelectModal({
+        title: "一括編集（請求ステータス）",
+        bodyHtml: body2,
+        okText: "確認へ",
+        cancelText: "キャンセル",
+        selectId: selectId2,
+      });
+      if (picked2 == null) return;
+      const nextKey = String(picked2 || "").trim() || "unbilled";
+      fields = { billing_status: nextKey };
+      confirmText = `請求ステータスを「${billingStatusLabel_(nextKey)}」に変更`;
+    } else if (item === "done") {
+      const selectId2 = "mBulkDoneSelect";
+      const body2 = `
+        <div class="p" style="margin-bottom:8px;">完了状態（変更後）を選択してください。</div>
+        <select id="${escapeHtml(selectId2)}" class="select" style="width:100%;">
+          <option value="done">完了</option>
+          <option value="open">未完了</option>
+        </select>
+        <div class="p" style="margin-top:8px; opacity:0.8;">対象：<strong>${escapeHtml(String(ids.length))}件</strong></div>
+      `;
+      const picked2 = await showSelectModal({
+        title: "一括編集（完了状態）",
+        bodyHtml: body2,
+        okText: "確認へ",
+        cancelText: "キャンセル",
+        selectId: selectId2,
+      });
+      if (picked2 == null) return;
+      const nextDone = (String(picked2) === "done");
+      fields = { is_done: nextDone, done: nextDone };
+      confirmText = `完了状態を「${nextDone ? "完了" : "未完了"}」に変更`;
+    } else if (item === "is_active") {
+      const selectId2 = "mBulkActiveSelect";
+      const body2 = `
+        <div class="p" style="margin-bottom:8px;">有効/削除済（変更後）を選択してください。</div>
+        <select id="${escapeHtml(selectId2)}" class="select" style="width:100%;">
+          <option value="active">有効</option>
+          <option value="inactive">削除済</option>
+        </select>
+        <div class="p" style="margin-top:8px; opacity:0.8;">対象：<strong>${escapeHtml(String(ids.length))}件</strong></div>
+      `;
+      const picked2 = await showSelectModal({
+        title: "一括編集（有効/削除済）",
+        bodyHtml: body2,
+        okText: "確認へ",
+        cancelText: "キャンセル",
+        selectId: selectId2,
+      });
+      if (picked2 == null) return;
+      const nextActive = (String(picked2) === "active");
+      fields = { is_active: nextActive };
+      confirmText = `有効ステータスを「${nextActive ? "有効" : "削除済"}」に変更`;
+    } else {
+      toast({ title: "対象外", message: "この項目は未対応です。" });
+      return;
+    }
+
+    // ===== 最終確認 =====
+    const ok = await showModal({
+      title: "確認",
+      bodyHtml: `
+        <p class="p"><strong>${escapeHtml(confirmText)}</strong>します。</p>
+        <div class="p" style="opacity:0.9; margin-top:8px;">
+          対象：<strong>${escapeHtml(String(ids.length))}件</strong><br/>
+          期間：${escapeHtml(state.date_from)} → ${escapeHtml(state.date_to_ymd)}<br/>
+          ※手動選択した予約のみが対象です
+        </div>
+      `,
+      okText: "実行",
+      cancelText: "キャンセル",
+      danger: (item === "is_active" && fields && fields.is_active === false),
+    });
+    if (!ok) return;
+
+    // ===== 事前スナップショット（rollback用）=====
+    const prevById = {};
+    for (const id of ids) {
+      const m = visitsAll.find(v => String(v.visit_id || v.id || "") === String(id));
+      if (m) prevById[id] = {
+        billing_status: pickBillingStatus_(m),
+        done: isDone_(m),
+        is_active: pickIsActive_(m),
+      };
+    }
+
+    // ===== Optimistic: visitsAll + cache + render =====
+    try {
+      for (const id of ids) {
+        const patch = { visit_id: id, ...fields };
+        const mm = mergeVisitById(visitsAll, id, patch);
+        visitsAll = mm.list;
+      }
+      saveCache_(cacheKey_(state), visitsAll);
+      applyAndRender_();
+    } catch (_) {}
+
+    // ===== Server: GAS bulkUpdateVisits =====
+    try {
+      const normalizeBulkFields_ = (fields0, item0) => {
+        const f = fields0 || {};
+        if (item0 === "done") {
+          // done/is_done 両方持っていても is_done のみ送る
+          return { is_done: !!(f.is_done ?? f.done) };
+        }
+        if (item0 === "is_active") {
+          return { is_active: !!f.is_active };
+        }
+        if (item0 === "billing_status") {
+          return { billing_status: String(f.billing_status || "").trim() || "unbilled" };
+        }
+        // 念のため（ここには来ない想定）
+        return f;
+      };
+
+      const fieldsForBulk = normalizeBulkFields_(fields, item);
+      const updates = ids.map((id) => ({
+        visit_id: String(id || "").trim(),
+        fields: { ...(fieldsForBulk || {}) },
+      })).filter(x => x.visit_id);
+
+      const up = await callGas({
+        action: "bulkUpdateVisits",
+        origin: "portal",
+        source: "portal",
+        updates,
+      }, idToken2);
+
+      const u = (up && typeof up === "object" && up.result && typeof up.result === "object") ? up.result : up;
+      if (u && u.success === false) throw new Error(u.error || u.message || "更新に失敗しました。");
+      const rs = (u && Array.isArray(u.results)) ? u.results : [];
+
+      const successRows = rs.filter(r => String(r?.status || "") === "success");
+      const failedRows  = rs.filter(r => String(r?.status || "") === "failed");
+      const failedIds = new Set(failedRows.map(r => String(r?.visit_id || "").trim()).filter(Boolean));
+
+      // 成功分はサーバ返却 updated を最終反映（無ければ現状維持）
+      for (const r of successRows) {
+        const id = String(r?.visit_id || "").trim();
+        if (!id) continue;
+        const uu = (r && r.updated && typeof r.updated === "object") ? r.updated : null;
+        if (!uu) continue;
+        const patch = { visit_id: id, ...uu };
+        const mm = mergeVisitById(visitsAll, id, patch);
+        visitsAll = mm.list;
+      }
+
+      // 失敗分のみ rollback
+      for (const id of failedIds) {
+        const prev = prevById[id];
+        if (!prev) continue;
+        const rollbackPatch = {
+          visit_id: id,
+          ...(item === "billing_status" ? { billing_status: prev.billing_status } : {}),
+          ...(item === "done" ? { is_done: prev.done, done: prev.done } : {}),
+          ...(item === "is_active" ? { is_active: prev.is_active } : {}),
+        };
+        const mm = mergeVisitById(visitsAll, id, rollbackPatch);
+        visitsAll = mm.list;
+      }
+
+      saveCache_(cacheKey_(state), visitsAll);
+      applyAndRender_();
+
+      if (failedIds.size) {
+        const msg = failedRows
+          .slice(0, 3)
+          .map(r => `${String(r?.visit_id || "")}: ${String(r?.error || "失敗")}`)
+          .join("\n");
+        toast({ title: "一部失敗", message: msg || `失敗: ${failedIds.size}件` });
+      } else {
+        toast({ title: "更新完了", message: `一括更新しました（${ids.length}件）。` });
+      }
+
+      // 実行後はOFF（事故防止）
+      setBulkMode_(false);
+    } catch (err) {
+      // ===== rollback（全対象）=====
+      try {
+        for (const id of ids) {
+          const prev = prevById[id];
+          if (!prev) continue;
+          const rollbackPatch = {
+            visit_id: id,
+            ...(item === "billing_status" ? { billing_status: prev.billing_status } : {}),
+            ...(item === "done" ? { is_done: prev.done, done: prev.done } : {}),
+            ...(item === "is_active" ? { is_active: prev.is_active } : {}),
+          };
+          const mm = mergeVisitById(visitsAll, id, rollbackPatch);
+          visitsAll = mm.list;
+        }
+        saveCache_(cacheKey_(state), visitsAll);
+        applyAndRender_();
+      } catch (_) {}
+      toast({ title: "更新失敗", message: err?.message || String(err || "") });
+    }
+  };
+
   const rebuildTypeOptions_ = () => {
     if (!typeEl) return;
     const base = (state.active_filter === "active_only")
@@ -526,6 +842,7 @@ export async function renderVisitsList(appEl, query) {
     listEl.innerHTML = sorted.map(cardHtml).join("");
     window.scrollTo(0, y);
     applyVisitTypeBadges_(listEl);
+    applyBulkModeToDom_();
     updateStatusBadges_(sorted.length, base.length);
   };
 
@@ -610,6 +927,9 @@ export async function renderVisitsList(appEl, query) {
   };
 
   await fetchAndRender_({ force: false });
+
+  // 初期表示（bulk bar）
+  updateBulkBar_();
 
   // ===== フィルタUI =====
   const resetToDefault_ = async () => {
@@ -706,6 +1026,40 @@ export async function renderVisitsList(appEl, query) {
     }
   });
 
+  // ===== bulk bar actions =====
+  bulkBarEl?.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if (!btn) return;
+    const a = btn.dataset.action;
+    if (a === "bulk-toggle") {
+      setBulkMode_(!bulkMode);
+      return;
+    }
+
+    if (a === "bulk-clear") {
+      clearBulkSelection_();
+      return;
+    }
+
+    if (a === "bulk-run") {
+      if (!bulkSelected.size) return;
+      await runBulkEdit_();
+      return;
+    }
+  });
+
+  // bulk checkbox change
+  listEl.addEventListener("change", (e) => {
+    const ch = e.target.closest('input[data-role="bulk-check"]');
+    if (!ch) return;
+    if (!bulkMode) return;
+    const vid = String(ch.getAttribute("data-visit-id") || ch.dataset.visitId || "").trim();
+    if (!vid) return;
+    if (ch.checked) bulkSelected.add(vid);
+    else bulkSelected.delete(vid);
+    updateBulkBar_();
+  });
+
   // カード内アクション（詳細 / 完了切替）
   listEl.addEventListener("click", async (e) => {
     const actEl = e.target.closest("[data-action]");
@@ -714,6 +1068,15 @@ export async function renderVisitsList(appEl, query) {
     const card = e.target.closest(".card");
     const vid = card?.dataset?.visitId;
     if (!vid) return;
+
+    // bulk mode: badge誤操作防止（チェック操作は許可）
+    if (bulkMode) {
+      // 「詳細」だけは許可しない（選択中に遷移事故を防止）→必要なら後でONに
+      if (actEl.dataset.action === "open") {
+        toast({ title: "一括編集モード", message: "一括編集をOFFにしてから詳細を開いてください。" });
+        return;
+      }
+    }
 
     const action = actEl.dataset.action;
 
@@ -725,6 +1088,14 @@ export async function renderVisitsList(appEl, query) {
       } catch (_) {}
       location.hash = `#/visits?id=${encodeURIComponent(vid)}`;
       return;
+    }
+
+    // bulk mode: バッジ操作を無効化（事故防止）
+    if (bulkMode) {
+      if (action === "toggle-active" || action === "change-billing-status" || action === "change-visit-type" || action === "toggle-done") {
+        toast({ title: "一括編集モード", message: "個別編集は一括編集をOFFにしてから行ってください。" });
+        return;
+      }
     }
 
     if (action === "toggle-active") {
