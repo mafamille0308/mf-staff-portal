@@ -3,6 +3,7 @@ import { render, toast, escapeHtml, showModal, showSelectModal, fmt, displayOrDa
 import { callGas, unwrapResults } from "../api.js";
 import { getIdToken } from "../auth.js";
 import { updateVisitDone } from "./visit_done_toggle.js";
+import { toggleVisitType, visitTypeLabel, ensureVisitTypeOptions } from "./visit_type_toggle.js";
 
 const BILLING_STATUS_LABELS_FALLBACK = {
   unbilled:   "未請求",
@@ -54,41 +55,6 @@ async function ensureBillingStatusLabelMap_(idToken) {
     _billingStatusOrderCache = Object.keys(_billingStatusLabelMapCache);
   }
   return { map: _billingStatusLabelMapCache, order: _billingStatusOrderCache };
-}
-
-const VISIT_TYPE_LABELS_FALLBACK = {
-  sitting: "シッティング",
-  training: "トレーニング",
-  meeting_free: "打ち合わせ（無料）",
-  meeting_paid: "打ち合わせ（有料）",
-};
-
-let _visitTypeLabelMapCache = null; // { [key]: label }
-
-function visitTypeLabel_(key) {
-  const k = String(key || "").trim();
-  if (!k) return "訪問種別未設定";
-  if (_visitTypeLabelMapCache && _visitTypeLabelMapCache[k]) return _visitTypeLabelMapCache[k];
-  return VISIT_TYPE_LABELS_FALLBACK[k] || k;
-}
-
-async function ensureVisitTypeLabelMap_(idToken) {
-  if (_visitTypeLabelMapCache) return _visitTypeLabelMapCache;
-  try {
-    const resp = await callGas({ action: "getVisitTypeOptions" }, idToken);
-    const u = unwrapResults(resp);
-    const results = (u && Array.isArray(u.results)) ? u.results : [];
-    const map = {};
-    for (const x of results) {
-      const kk = String(x?.key || x?.type || x?.value || "").trim();
-      const ll = String(x?.label || x?.name || "").trim();
-      if (kk) map[kk] = ll || kk;
-    }
-    _visitTypeLabelMapCache = Object.keys(map).length ? map : { ...VISIT_TYPE_LABELS_FALLBACK };
-  } catch (_) {
-    _visitTypeLabelMapCache = { ...VISIT_TYPE_LABELS_FALLBACK };
-  }
-  return _visitTypeLabelMapCache;
 }
 
 // ===== sessionStorage keys =====
@@ -258,7 +224,7 @@ function applyVisitTypeBadges_(rootEl) {
   const nodes = root.querySelectorAll('[data-role="visit-type-badge"]');
   nodes.forEach((el) => {
     const key = el?.dataset?.visitType || "";
-    el.textContent = visitTypeLabel_(key);
+    el.textContent = visitTypeLabel(key);
   });
 }
 
@@ -292,9 +258,12 @@ function cardHtml(v) {
       </div>
       <div class="badges" data-role="badges">
         <span class="badge badge-visit-type"
+          data-action="change-visit-type"
+          style="cursor:pointer;"
+          title="タップで訪問タイプを変更"
           data-role="visit-type-badge"
           data-visit-type="${escapeHtml(String(visitType || ""))}">
-          ${escapeHtml(visitTypeLabel_(visitType))}
+          ${escapeHtml(visitTypeLabel(visitType))}
         </span>
         <span class="badge badge-billing-status"
           data-action="change-billing-status"
@@ -489,7 +458,7 @@ export async function renderVisitsList(appEl, query) {
       "未完了優先";
     const typeLabel =
       (state.type_filter && state.type_filter !== "all")
-        ? visitTypeLabel_(state.type_filter)
+        ? visitTypeLabel(state.type_filter)
         : "すべて";
     const activeLabel = (state.active_filter === "include_deleted") ? "含める" : "除外";
     badgesEl.innerHTML = [
@@ -512,7 +481,7 @@ export async function renderVisitsList(appEl, query) {
     const current = String(state.type_filter || "all");
     typeEl.innerHTML = [
       `<option value="all">すべて</option>`,
-      ...types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(visitTypeLabel_(t))}</option>`)
+      ...types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(visitTypeLabel(t))}</option>`)
     ].join("");
     // 既存選択が無効なら all に戻す
     const exists = (current === "all") || types.includes(current);
@@ -577,7 +546,7 @@ export async function renderVisitsList(appEl, query) {
     }
 
     // 訪問種別ラベル（失敗してもフォールバック）
-    ensureVisitTypeLabelMap_(idToken)
+    ensureVisitTypeOptions(idToken)
       .then(() => { applyVisitTypeBadges_(appEl); rebuildTypeOptions_(); updateStatusBadges_(0, 0); })
       .catch(() => {});
 
@@ -633,7 +602,7 @@ export async function renderVisitsList(appEl, query) {
 
     // ラベル取得後に種別フィルタの表示文字列も更新したいので、ここで待つ（失敗しても進む）
     try {
-      await ensureVisitTypeLabelMap_(idToken);
+      await ensureVisitTypeOptions(idToken);
     } catch (_) {}
 
     rebuildTypeOptions_();
@@ -927,6 +896,83 @@ export async function renderVisitsList(appEl, query) {
           saveCache_(cacheKey_(state), visitsAll);
           applyAndRender_();
         } catch (_) {}
+      } finally {
+        actEl.dataset.busy = "0";
+      }
+      return;
+    }
+
+    if (action === "change-visit-type") {
+      if (actEl.dataset.busy === "1") return;
+
+      const idToken2 = getIdToken();
+      if (!idToken2) {
+        toast({ title: "未ログイン", message: "再ログインしてください。" });
+        return;
+      }
+
+      actEl.dataset.busy = "1";
+
+      const prevType = String(actEl.dataset.visitType || "").trim();
+      const prevText = actEl.textContent;
+
+      const titleEl = card?.querySelector(".card-sub div:nth-child(2)");
+      const prevTitleText = titleEl ? titleEl.textContent : "";
+
+      // ===== Optimistic UI（即時反映）=====
+      const applyOptimistic = (nextType, nextLabel) => {
+        actEl.dataset.visitType = String(nextType || "").trim();
+        actEl.textContent = nextLabel;
+        if (card) card.dataset.visitType = String(nextType || "").trim();
+      };
+
+      const revertOptimistic = () => {
+        actEl.dataset.visitType = prevType;
+        actEl.textContent = prevText;
+        if (card) card.dataset.visitType = prevType;
+        if (titleEl) titleEl.textContent = prevTitleText;
+      };
+
+      const applyFinal = (u) => {
+        const uu = (u && u.updated && typeof u.updated === "object") ? u.updated : u;
+        const vt = String(uu?.visit_type || uu?.visitType || actEl.dataset.visitType || "").trim();
+        if (vt) {
+          actEl.dataset.visitType = vt;
+          actEl.textContent = visitTypeLabel(vt);
+          if (card) card.dataset.visitType = vt;
+        }
+        if (uu?.title && titleEl) titleEl.textContent = String(uu.title);
+      };
+
+      try {
+        await ensureVisitTypeOptions(idToken2);
+        const r = await toggleVisitType({
+          idToken: idToken2,
+          visitId: vid,
+          currentType: prevType,
+          applyOptimistic,
+          applyFinal,
+          revertOptimistic
+        });
+
+        if (r && r.ok && r.updated) {
+          // state 反映（並び/フィルタの整合性のため）
+          try {
+            const uu = (r.updated && r.updated.updated && typeof r.updated.updated === "object") ? r.updated.updated : r.updated;
+            const patch = {
+              visit_id: vid,
+              ...(uu?.visit_type ? { visit_type: uu.visit_type } : {}),
+              ...(uu?.title ? { title: uu.title } : {}),
+            };
+            const m2 = mergeVisitById(visitsAll, vid, patch);
+            visitsAll = m2.list;
+            saveCache_(cacheKey_(state), visitsAll);
+            applyAndRender_();
+          } catch (_) {}
+        }
+      } catch (err) {
+        toast({ title: "更新失敗", message: err?.message || String(err || "") });
+        try { revertOptimistic(); } catch (_) {}
       } finally {
         actEl.dataset.busy = "0";
       }

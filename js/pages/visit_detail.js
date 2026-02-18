@@ -3,6 +3,7 @@ import { render, toast, escapeHtml, showModal, showSelectModal, fmt, displayOrDa
 import { callGas, unwrapOne, unwrapResults } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 import { updateVisitDone } from "./visit_done_toggle.js";
+import { toggleVisitType, visitTypeLabel, ensureVisitTypeOptions } from "./visit_type_toggle.js";
 
 const BILLING_STATUS_LABELS_FALLBACK = {
   unbilled:   "未請求",
@@ -54,41 +55,6 @@ async function ensureBillingStatusLabelMap_(idToken) {
     _billingStatusOrderCache = Object.keys(_billingStatusLabelMapCache);
   }
   return { map: _billingStatusLabelMapCache, order: _billingStatusOrderCache };
-}
-
-const VISIT_TYPE_LABELS_FALLBACK = {
-  sitting: "シッティング",
-  training: "トレーニング",
-  meeting_free: "打ち合わせ（無料）",
-  meeting_paid: "打ち合わせ（有料）",
-};
-
-let _visitTypeLabelMapCache = null; // { [key]: label }
-
-function visitTypeLabel_(key) {
-  const k = String(key || "").trim();
-  if (!k) return "訪問種別未設定";
-  if (_visitTypeLabelMapCache && _visitTypeLabelMapCache[k]) return _visitTypeLabelMapCache[k];
-  return VISIT_TYPE_LABELS_FALLBACK[k] || k;
-}
-
-async function ensureVisitTypeLabelMap_(idToken) {
-  if (_visitTypeLabelMapCache) return _visitTypeLabelMapCache;
-  try {
-    const resp = await callGas({ action: "getVisitTypeOptions" }, idToken);
-    const u = unwrapResults(resp);
-    const results = (u && Array.isArray(u.results)) ? u.results : [];
-    const map = {};
-    for (const x of results) {
-      const kk = String(x?.key || x?.type || x?.value || "").trim();
-      const ll = String(x?.label || x?.name || "").trim();
-      if (kk) map[kk] = ll || kk;
-    }
-    _visitTypeLabelMapCache = Object.keys(map).length ? map : { ...VISIT_TYPE_LABELS_FALLBACK };
-  } catch (_) {
-    _visitTypeLabelMapCache = { ...VISIT_TYPE_LABELS_FALLBACK };
-  }
-  return _visitTypeLabelMapCache;
 }
 
 const KEY_VD_CACHE_PREFIX = "mf:visit_detail:cache:v1:";
@@ -307,8 +273,13 @@ export async function renderVisitDetail(appEl, query) {
       <div>${escapeHtml(displayOrDash(fmt(visit.visit_id || "")))}</div>
       </div>
       <div class="row card-meta" style="gap:8px; flex-wrap:wrap;">
-      <span class="badge badge-visit-type" id="vdVisitTypeBadge">
-        ${escapeHtml(visitTypeLabel_(visit.visit_type || ""))}
+      <span class="badge badge-visit-type" id="vdVisitTypeBadge"
+        data-action="change-visit-type"
+        style="cursor:pointer;"
+        title="タップで訪問タイプを変更"
+        data-role="visit-type-badge"
+        data-visit-type="${escapeHtml(String(visit.visit_type || ""))}">
+        ${escapeHtml(visitTypeLabel(visit.visit_type || ""))}
       </span>
       <span class="badge badge-billing-status"
         data-action="change-billing-status"
@@ -359,10 +330,10 @@ export async function renderVisitDetail(appEl, query) {
   `;
 
   // ===== 訪問タイプの日本語ラベル取得（失敗してもフォールバック表示）=====
-  ensureVisitTypeLabelMap_(idToken)
+  ensureVisitTypeOptions(idToken)
     .then(() => {
       const b = host.querySelector("#vdVisitTypeBadge");
-      if (b) b.textContent = visitTypeLabel_(visit.visit_type || "");
+      if (b) b.textContent = visitTypeLabel(visit.visit_type || "");
     })
     .catch(() => {});
 
@@ -532,6 +503,65 @@ export async function renderVisitDetail(appEl, query) {
         actEl.classList.toggle("is-active", prevClasses.isActive);
         actEl.classList.toggle("badge-danger", prevClasses.badgeDanger);
         actEl.classList.toggle("is-inactive", prevClasses.isInactive);
+      } finally {
+        actEl.dataset.busy = "0";
+      }
+      return;
+    }
+
+    if (action === "change-visit-type") {
+      if (actEl.dataset.busy === "1") return;
+
+      const idToken2 = getIdToken();
+      if (!idToken2) {
+        toast({ title: "未ログイン", message: "再ログインしてください。" });
+        return;
+      }
+
+      actEl.dataset.busy = "1";
+
+      const prevType = String(actEl.dataset.visitType || "").trim();
+      const prevText = actEl.textContent;
+
+      // タイトル要素（visit.detail のタイトル）
+      const titleEl = rootCard?.querySelector(".visit-title");
+      const prevTitleText = titleEl ? titleEl.textContent : "";
+
+      // ===== Optimistic UI（即時反映）=====
+      const applyOptimistic = (nextType, nextLabel) => {
+        actEl.dataset.visitType = String(nextType || "").trim();
+        actEl.textContent = nextLabel;
+      };
+
+      const revertOptimistic = () => {
+        actEl.dataset.visitType = prevType;
+        actEl.textContent = prevText;
+        if (titleEl) titleEl.textContent = prevTitleText;
+      };
+
+      const applyFinal = (u) => {
+        const uu = (u && u.updated && typeof u.updated === "object") ? u.updated : u;
+        const vt = String(uu?.visit_type || uu?.visitType || actEl.dataset.visitType || "").trim();
+        if (vt) {
+          actEl.dataset.visitType = vt;
+          actEl.textContent = visitTypeLabel(vt);
+        }
+        if (uu?.title && titleEl) titleEl.textContent = String(uu.title);
+      };
+
+      try {
+        await ensureVisitTypeOptions(idToken2);
+        await toggleVisitType({
+          idToken: idToken2,
+          visitId: visitId,
+          currentType: prevType,
+          applyOptimistic,
+          applyFinal,
+          revertOptimistic
+        });
+      } catch (err) {
+        toast({ title: "更新失敗", message: err?.message || String(err || "") });
+        try { revertOptimistic(); } catch (_) {}
       } finally {
         actEl.dataset.busy = "0";
       }
