@@ -1,6 +1,6 @@
 // js/pages/visit_detail.js
 import { render, toast, escapeHtml, showModal, showSelectModal, fmt, displayOrDash, fmtDateTimeJst, fmtDateJst, fmtAgeFromBirthdateJst } from "../ui.js";
-import { callGas, unwrapOne, unwrapResults } from "../api.js";
+import { callGas, unwrapResults } from "../api.js";
 import { getIdToken, setUser } from "../auth.js";
 import { updateVisitDone } from "./visit_done_toggle.js";
 import { toggleVisitType, visitTypeLabel, ensureVisitTypeOptions } from "./visit_type_toggle.js";
@@ -241,25 +241,23 @@ export async function renderVisitDetail(appEl, query) {
 
   if (res.ctx) setUser(res.ctx);
 
-  const visit = unwrapOne(res);
+  const visit = res.visit;
 
   if (!visit) {
     host.innerHTML = `<p class="p">対象の予約が見つかりません。</p>`;
     return;
   }
 
-  const done = (visit.done === true) || (String(visit.is_done || "").toLowerCase() === "true");
-  const isActive = !(visit.is_active === false || String(visit.is_active || "").toLowerCase() === "false");
+  const done = (visit.is_done === true);
+  const isActive = (visit.is_active === true);
 
-  const billingStatusRaw = visit.billing_status || visit.request_status || ""; // 移行期間互換
-  const billingStatus = String(billingStatusRaw || "").trim() || "unbilled";
+  const billingStatus = String(visit.billing_status || "").trim() || "unbilled";
 
-  const startDisp = fmtDateTimeJst(visit.start_time || visit.start || "");
-  const endDisp   = fmtDateTimeJst(visit.end_time || visit.end || "");
+  const startDisp = fmtDateTimeJst(visit.start_time || "");
+  const endDisp   = fmtDateTimeJst(visit.end_time || "");
 
-  // 名前表示を優先（GAS側で付与する想定）
-  const staffName = fmt(visit.staff_name || visit.staffName || "").trim();
-  const customerName = fmt(visit.customer_name || visit.customerName || "").trim();
+  const staffName = fmt(visit.staff_name || "").trim();
+  const customerName = fmt(visit.customer_name || "").trim();
 
   const visitHtml = `
     <div class="card"
@@ -347,7 +345,7 @@ export async function renderVisitDetail(appEl, query) {
     if (res2 && res2.ctx) setUser(res2.ctx);
     if (!res2 || res2.success === false) throw new Error((res2 && (res2.error || res2.message)) || "getVisitDetail failed");
 
-    const customerDetail = res2.customer_detail || res2.customerDetail || null;
+    const customerDetail = res2.customer_detail || null;
 
     let customerInfoHtml = `<p class="p">（顧客情報は未取得）</p>`;
     let petsHtml = `<p class="p">（ペット情報は未取得）</p>`;
@@ -358,11 +356,22 @@ export async function renderVisitDetail(appEl, query) {
       const pets = Array.isArray(customerDetail.pets) ? customerDetail.pets : [];
       const cp = customerDetail.careProfile || customerDetail.care_profile || null;
 
-      const customerId2 = String(visit.customer_id || visit.customerId || c.id || c.customer_id || "").trim();
+      const customerId2 = String(visit.customer_id || c.id || "").trim();
       const customerLabel2 = String(c.name || customerName || "").trim();
 
       const customerDetailHref = customerId2
         ? `#/customers?id=${encodeURIComponent(customerId2)}`
+        : "";
+
+      const keyPickupRule = fmt(c.keyPickupRule || "").trim();
+      const keyPickupRuleOther = fmt(c.keyPickupRuleOther || "").trim();
+      const keyReturnRule = fmt(c.keyReturnRule || "").trim();
+      const keyReturnRuleOther = fmt(c.keyReturnRuleOther || "").trim();
+      const keyPickupDisp = keyPickupRule
+        ? (keyPickupRuleOther ? `${keyPickupRule}（${keyPickupRuleOther}）` : keyPickupRule)
+        : "";
+      const keyReturnDisp = keyReturnRule
+        ? (keyReturnRuleOther ? `${keyReturnRule}（${keyReturnRuleOther}）` : keyReturnRule)
         : "";
 
       customerInfoHtml = `
@@ -377,7 +386,9 @@ export async function renderVisitDetail(appEl, query) {
           <div class="p">
             <div><strong>電話</strong>：${escapeHtml(displayOrDash(fmt(c.phone || "")))}</div>
             <div><strong>住所</strong>：${escapeHtml(displayOrDash(fmt(c.address_full || c.address || "")))}</div>
-            <div><strong>鍵</strong>：${escapeHtml(displayOrDash(fmt(c.key_location || c.keyLocation || "")))}</div>
+            <div><strong>鍵所在</strong>：${escapeHtml(displayOrDash(fmt(c.key_location || c.keyLocation || "")))}</div>
+            <div><strong>鍵受取</strong>：${escapeHtml(displayOrDash(keyPickupDisp))}</div>
+            <div><strong>鍵返却</strong>：${escapeHtml(displayOrDash(keyReturnDisp))}</div>
           </div>
         </div>
       `;
@@ -800,7 +811,7 @@ export async function renderVisitDetail(appEl, query) {
       }
       if (re.ctx) setUser(re.ctx);
 
-      const v2 = unwrapOne(re);
+      const v2 = re.visit;
       const freshMemo = fmt(v2 && v2.memo).trim();
 
       if (memoText) memoText.textContent = freshMemo ? freshMemo : "—";
