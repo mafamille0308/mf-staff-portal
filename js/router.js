@@ -9,6 +9,8 @@ import { renderCustomerDetail } from "./pages/customer_detail.js";
 import { renderSummaryPlaceholder } from "./pages/summary.js";
 import { renderRegisterTab } from "./pages/register.js";
 
+const KEY_RETURN_TO_HASH = "mf_return_to_hash";
+
 function parseRoute() {
   const hash = location.hash || "#/visits";
   const [pathPart, queryPart] = hash.slice(1).split("?");
@@ -48,12 +50,22 @@ async function route() {
 
   // 未ログインはログイン画面
   if (!isAuthed()) {
+    // 操作中の画面（hash）を退避して、ログイン後に復帰できるようにする
+    const currentHash = location.hash || "#/visits";
+    try { sessionStorage.setItem(KEY_RETURN_TO_HASH, currentHash); } catch (_) {}
     setActiveNav("");
     initGoogleLogin({
       containerId: "app",
       onLogin: () => {
-        // ログイン後は予約一覧へ
-        if (location.hash !== "#/visits") location.hash = "#/visits";
+        // ログイン後は「直前に見ていた画面」へ戻す（なければ /visits）
+        let nextHash = "";
+        try {
+          nextHash = String(sessionStorage.getItem(KEY_RETURN_TO_HASH) || "").trim();
+          sessionStorage.removeItem(KEY_RETURN_TO_HASH);
+        } catch (_) {}
+
+        if (!nextHash || !nextHash.startsWith("#/")) nextHash = "#/visits";
+        if (location.hash !== nextHash) location.hash = nextHash;
         route(); // hashchangeが発火しないケースでも再描画する
       },
     });

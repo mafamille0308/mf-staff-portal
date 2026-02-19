@@ -36,6 +36,20 @@ function _isExpiredIdToken(idToken, skewSeconds = 60) {
   return exp <= (now + skewSeconds);
 }
 
+// GIS (Google Identity Services) のロード待ち
+function _waitForGisReady({ timeoutMs = 8000, intervalMs = 50 } = {}) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const tick = () => {
+      const ok = !!(window.google && window.google.accounts && window.google.accounts.id);
+      if (ok) return resolve(true);
+      if ((Date.now() - t0) >= timeoutMs) return resolve(false);
+      setTimeout(tick, intervalMs);
+    };
+    tick();
+  });
+}
+
 export function setIdToken(idToken) {
   const t = String(idToken || "").trim();
   if (!t) return;
@@ -95,49 +109,6 @@ export function initGoogleLogin({ containerId = "app", onLogin } = {}) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  // GIS の初期化
-  window.google?.accounts?.id?.initialize({
-    client_id: CONFIG.GOOGLE_CLIENT_ID,
-    callback: (resp) => {
-      const token = resp && resp.credential;
-      if (!token) {
-        toast({ title: "ログイン失敗", message: "credential が取得できませんでした。" });
-        return;
-      }
-
-      // NOTE: ここでは token を保存しない（= ログイン成立させない）。
-      // GAS側で Staffs.login_email に登録済みか（在籍/有効か）を確認し、
-      // OK のときだけ setIdToken する。
-      toast({ title: "認可確認中", message: "アカウント権限を確認しています…" });
-
-      (async () => {
-        try {
-          // 循環import回避（api.js は auth.js を参照しているため動的import）
-          const mod = await import("./api.js");
-          const callGas = mod && mod.callGas;
-          if (typeof callGas !== "function") throw new Error("callGas is not available");
-
-          const res = await callGas({ action: "getMe" }, token);
-          if (!res || res.success === false) {
-            throw new Error((res && (res.error || res.message)) || "Not authorized");
-          }
-
-          // OK：ここで初めてログイン確定
-          setIdToken(token);
-          toast({ title: "ログイン完了", message: "ログインしました。" });
-          if (typeof onLogin === "function") onLogin(token);
-        } catch (e) {
-          // NG：保存しない（= 未ログインのまま）
-          try { clearIdToken(); } catch (_) {}
-          toast({
-            title: "ログイン不可",
-            message: "このアカウントは利用許可がありません。"
-          });
-        }
-      })();
-    },
-  });
-
   // ボタン描画（都度再描画してOK）
   const btnHostId = "gisBtnHost";
   container.innerHTML = `
@@ -149,16 +120,68 @@ export function initGoogleLogin({ containerId = "app", onLogin } = {}) {
     </section>
   `;
 
-  window.google?.accounts?.id?.renderButton(
-    document.getElementById(btnHostId),
-    {
-      theme: "outline",
-      size: "large",
-      text: "signin_with",
-      shape: "pill",
-      width: 320,
+  (async () => {
+    const ready = await _waitForGisReady({ timeoutMs: 8000, intervalMs: 50 });
+    if (!ready) {
+      toast({ title: "ログイン準備中", message: "ログイン機能の読み込みに失敗しました。更新して再試行してください。" });
+      return;
     }
-  );
+
+    // GIS の初期化
+    window.google.accounts.id.initialize({
+      client_id: CONFIG.GOOGLE_CLIENT_ID,
+      callback: (resp) => {
+        const token = resp && resp.credential;
+        if (!token) {
+          toast({ title: "ログイン失敗", message: "credential が取得できませんでした。" });
+          return;
+        }
+
+        // NOTE: ここでは token を保存しない（= ログイン成立させない）。
+        // GAS側で Staffs.login_email に登録済みか（在籍/有効か）を確認し、
+        // OK のときだけ setIdToken する。
+        toast({ title: "認可確認中", message: "アカウント権限を確認しています…" });
+
+        (async () => {
+          try {
+            // 循環import回避（api.js は auth.js を参照しているため動的import）
+            const mod = await import("./api.js");
+            const callGas = mod && mod.callGas;
+            if (typeof callGas !== "function") throw new Error("callGas is not available");
+
+            const res = await callGas({ action: "getMe" }, token);
+            if (!res || res.success === false) {
+              throw new Error((res && (res.error || res.message)) || "Not authorized");
+            }
+
+            // OK：ここで初めてログイン確定
+            setIdToken(token);
+            toast({ title: "ログイン完了", message: "ログインしました。" });
+            if (typeof onLogin === "function") onLogin(token);
+          } catch (e) {
+            // NG：保存しない（= 未ログインのまま）
+            try { clearIdToken(); } catch (_) {}
+            toast({
+              title: "ログイン不可",
+              message: "このアカウントは利用許可がありません。"
+            });
+          }
+        })();
+      },
+    });
+
+    // ボタン描画
+    window.google.accounts.id.renderButton(
+      document.getElementById(btnHostId),
+      {
+        theme: "outline",
+        size: "large",
+        text: "signin_with",
+        shape: "pill",
+        width: 320,
+      }
+    );
+  })();
 }
 
 /**
