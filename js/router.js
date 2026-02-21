@@ -8,6 +8,7 @@ import { renderCustomersList } from "./pages/customers_list.js";
 import { renderCustomerDetail } from "./pages/customer_detail.js";
 import { renderSummaryPlaceholder } from "./pages/summary.js";
 import { renderRegisterTab } from "./pages/register.js";
+import { renderSettings } from "./pages/settings.js";
 
 const KEY_RETURN_TO_HASH = "mf_return_to_hash";
 
@@ -45,6 +46,7 @@ async function route() {
   if (path.startsWith("/visits")) setActiveNav("visits");
   else if (path.startsWith("/customers")) setActiveNav("customers");
   else if (path.startsWith("/summary")) setActiveNav("summary");
+  else if (path.startsWith("/settings")) setActiveNav("settings");
   else if (path.startsWith("/register")) setActiveNav("");
   else setActiveNav("");
 
@@ -91,6 +93,8 @@ async function route() {
       }
     } else if (path === "/summary") {
       renderSummaryPlaceholder(app);
+    } else if (path === "/settings") {
+      await renderSettings(app, query);
     } else if (path === "/register") {
       renderRegisterTab(app, query);
     } else {
