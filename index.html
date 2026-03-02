@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MF Staff Portal</title>
+  <link rel="stylesheet" href="./assets/styles.css" />
+  <!-- GIS -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-title">MF Staff Portal</div>
+
+    <div class="app-header-right">
+      <div id="userBadge" class="user-badge is-hidden"></div>
+      <button id="btnRefresh" class="btn btn-ghost" type="button">更新</button>
+    </div>
+  </header>
+
+  <main id="app" class="app-main"></main>
+
+  <nav class="bottom-nav">
+    <a class="nav-item" href="#/visits" data-route="visits">予約</a>
+    <a class="nav-item" href="#/customers" data-route="customers">顧客</a>
+    <a class="nav-item" href="#/summary" data-route="summary">稼働</a>
+    <a class="nav-item" href="#/settings" data-route="settings">設定</a>
+  </nav>
+
+  <!-- Toast -->
+  <div id="toastHost" class="toast-host"></div>
+
+  <!-- Modal -->
+  <div id="modalHost" class="modal-host is-hidden" aria-hidden="true"></div>
+
+  <script type="module">
+    import { initApp } from "./js/router.js";
+    initApp();
+  </script>
+</body>
+</html>
