@@ -1,0 +1,104 @@
+// js/api.js
+import { CONFIG } from "./config.js";
+import { setUser, clearIdToken } from "./auth.js";
+
+function newRequestId() {
+  return "web_" + Date.now() + "_" + Math.random().toString(16).slice(2);
+}
+
+export class ApiError extends Error {
+  constructor(message, { status = 0, detail = null } = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+    this.request_id = (detail && detail.request_id) ? String(detail.request_id) : "";
+  }
+}
+
+/**
+ * GAS WebApp にJSON POST
+ * @param {object} payload
+ * @param {string} idToken
+ */
+export async function callGas(payload, idToken) {
+  if (!CONFIG.GAS_WEBAPP_URL || CONFIG.GAS_WEBAPP_URL.includes("PUT_YOUR_")) {
+    throw new ApiError("GAS_WEBAPP_URL が未設定です。config.js を確認してください。");
+  }
+  if (!idToken) {
+    throw new ApiError("未ログインです（id_tokenがありません）。");
+  }
+
+  const rid = (payload && payload.request_id) ? String(payload.request_id) : newRequestId();
+  const body = {
+    request_id: rid,
+    id_token: idToken,
+    ...payload,
+  };
+
+  const resp = await fetch(CONFIG.GAS_WEBAPP_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(body),
+  });
+
+  const text = await resp.text();
+
+  let json = null;
+  try { json = JSON.parse(text); }
+  catch (e) {
+    throw new ApiError("GAS応答のJSON解析に失敗しました。", {
+      status: resp.status,
+      detail: { request_id: rid, raw_text: text },
+    });
+  }
+
+ // 診断用メタ
+  try {
+    if (json && typeof json === "object") {
+      json._meta = { request_id: rid, http_status: resp.status };
+    }
+  } catch (e) {}
+
+  if (!resp.ok) {
+    throw new ApiError(`HTTP ${resp.status}`, {
+      status: resp.status,
+      detail: { request_id: rid, response: json },
+    });
+  }
+  if (json && (json.ok === false || json.success === false)) {
+    // 認証エラーならtokenを破棄し、再ログインに寄せる
+    const msg = String(json.error || "");
+    if (msg.includes("Invalid id_token") || msg.includes("invalid_token")) {
+      clearIdToken();
+      throw new ApiError("認証の有効期限が切れました。再ログインしてください。", {
+        status: resp.status,
+        detail: { request_id: rid, response: json },
+      });
+    }
+    throw new ApiError(json.error || "GASでエラーが発生しました。", {
+      status: resp.status,
+      detail: { request_id: rid, response: json },
+    });
+  }
+
+  return json;
+}
+
+// callGas の返却が「配列 or オブジェクト」どちらでも動かす
+export function unwrapResults(res) {
+  if (Array.isArray(res)) return { results: res, ctx: null, raw: res };
+  const results = (res && (res.results || res.visits || res.data)) || [];
+  const ctx = (res && res.ctx) || null;
+
+  try {
+    if (ctx) setUser(ctx);
+  } catch (_) {}
+
+  return { results, ctx, raw: res };
+}
+
+export function unwrapOne(res) {
+  if (!res) return null;
+  return res.visit || res.result || res.data || null;
+}
